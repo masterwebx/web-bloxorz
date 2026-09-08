@@ -192,11 +192,83 @@ function copyRect(
   return c;
 }
 
+/** Original stage art already paints Passcode/Moves into the bitmap. Wipe that under-layer. */
+function scrubBakedHud(img: HTMLImageElement): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = STAGE_W;
+  c.height = STAGE_H;
+  const g = c.getContext("2d")!;
+  g.drawImage(img, 0, 0, STAGE_W, STAGE_H);
+  const data = g.getImageData(0, 0, STAGE_W, STAGE_H);
+  const px = data.data;
+  const x0 = Math.floor((375 * STAGE_W) / img.width);
+  const x1 = Math.min(STAGE_W, Math.ceil((540 * STAGE_W) / img.width));
+  const y0 = 0;
+  const y1 = Math.min(STAGE_H, Math.ceil((48 * STAGE_H) / img.height));
+  const sampleX = Math.max(0, x0 - 10);
+  for (let y = y0; y < y1; y++) {
+    const si = (y * STAGE_W + sampleX) * 4;
+    const r = px[si];
+    const gv = px[si + 1];
+    const b = px[si + 2];
+    const a = px[si + 3];
+    for (let x = x0; x < x1; x++) {
+      const i = (y * STAGE_W + x) * 4;
+      px[i] = r;
+      px[i + 1] = gv;
+      px[i + 2] = b;
+      px[i + 3] = a;
+    }
+  }
+  g.putImageData(data, 0, 0);
+  return c;
+}
+
+/** Square rust tile from the lit top of the original standing sprite, lifted so faces stay readable. */
+function makeRustTile(src: HTMLCanvasElement): HTMLCanvasElement {
+  const tile = copyRect(src, 90, 40, 22, 20, 64, 64);
+  const g = tile.getContext("2d")!;
+  const data = g.getImageData(0, 0, 64, 64);
+  const px = data.data;
+  let sr = 0;
+  let sg = 0;
+  let sb = 0;
+  let n = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i] + px[i + 1] + px[i + 2] > 50) {
+      sr += px[i];
+      sg += px[i + 1];
+      sb += px[i + 2];
+      n++;
+    }
+  }
+  const ar = n ? sr / n : 168;
+  const ag = n ? sg / n : 118;
+  const ab = n ? sb / n : 92;
+  for (let i = 0; i < px.length; i += 4) {
+    let r = px[i];
+    let gv = px[i + 1];
+    let b = px[i + 2];
+    if (r + gv + b < 50) {
+      r = ar;
+      gv = ag;
+      b = ab;
+    }
+    px[i] = Math.min(255, r * 1.32 + 40);
+    px[i + 1] = Math.min(255, gv * 1.2 + 24);
+    px[i + 2] = Math.min(255, b * 1.08 + 12);
+    px[i + 3] = 255;
+  }
+  g.putImageData(data, 0, 0);
+  return tile;
+}
+
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   cam: Camera = { x: 0, y: 0 };
   private knockCache = new Map<HTMLImageElement, HTMLCanvasElement>();
   private rust: HTMLCanvasElement;
+  private levelBg: HTMLCanvasElement;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -204,7 +276,8 @@ export class Renderer {
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
-    this.rust = copyRect(this.knocked(assets.block.up), 103, 55, 16, 52, 32, 64);
+    this.rust = makeRustTile(this.knocked(assets.block.up));
+    this.levelBg = scrubBakedHud(assets.ui.levelBg);
   }
 
   private knocked(img: HTMLImageElement): HTMLCanvasElement {
@@ -236,7 +309,7 @@ export class Renderer {
   }
 
   drawBg(kind: "menu" | "level"): void {
-    const img = kind === "menu" ? this.assets.ui.menuBg : this.assets.ui.levelBg;
+    const img = kind === "menu" ? this.assets.ui.menuBg : this.levelBg;
     this.ctx.drawImage(img, 0, 0, STAGE_W, STAGE_H);
     const g = this.ctx.createRadialGradient(200, 90, 20, 260, 180, 420);
     g.addColorStop(0, "rgba(0,0,0,0)");
@@ -433,9 +506,15 @@ export class Renderer {
       anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38,
     );
 
-    const sheet = this.rust;
-    const tex = [sheet, sheet, sheet, sheet, sheet, sheet];
-    const shade = [1, 0.32, 0.82, 0.58, 0.7, 0.9];
+    const shade = [1, 0.62, 0.94, 0.78, 0.86, 0.96];
+    const uv: [number, number][] = [
+      [box.w, box.d],
+      [box.w, box.d],
+      [box.w, box.h],
+      [box.d, box.h],
+      [box.w, box.h],
+      [box.d, box.h],
+    ];
 
     const ctx = this.ctx;
     ctx.save();
@@ -443,7 +522,7 @@ export class Renderer {
     for (const f of faces) {
       if (f.cross <= 0) continue;
       if (f.fi === 1 && extraZ >= -0.08) continue;
-      this.paintFace(tex[f.fi], f.pts, shade[f.fi]);
+      this.paintFace(this.rust, f.pts, shade[f.fi], uv[f.fi][0], uv[f.fi][1]);
     }
     ctx.restore();
   }
@@ -452,41 +531,45 @@ export class Renderer {
     tex: HTMLCanvasElement,
     pts: { x: number; y: number }[],
     shade: number,
+    uw: number,
+    uh: number,
   ): void {
     const ctx = this.ctx;
+    const tilesU = Math.max(1, Math.round(uw));
+    const tilesV = Math.max(1, Math.round(uh));
     const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
     const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
     const grow = pts.map((p) => {
       const dx = p.x - cx;
       const dy = p.y - cy;
       const len = Math.hypot(dx, dy) || 1;
-      return { x: p.x + (dx / len) * 0.35, y: p.y + (dy / len) * 0.35 };
+      return { x: p.x + (dx / len) * 0.25, y: p.y + (dy / len) * 0.25 };
     });
+    ctx.save();
     ctx.beginPath();
     ctx.moveTo(grow[0].x, grow[0].y);
     for (let i = 1; i < 4; i++) ctx.lineTo(grow[i].x, grow[i].y);
     ctx.closePath();
-    ctx.fillStyle = `rgb(${Math.round(118 * shade)},${Math.round(78 * shade)},${Math.round(62 * shade)})`;
-    ctx.fill();
-    ctx.save();
     ctx.clip();
-    const w = tex.width;
-    const h = tex.height;
     const p0 = grow[0];
     const p1 = grow[1];
     const p3 = grow[3];
     ctx.setTransform(
-      (p1.x - p0.x) / w,
-      (p1.y - p0.y) / w,
-      (p3.x - p0.x) / h,
-      (p3.y - p0.y) / h,
+      (p1.x - p0.x) / tilesU,
+      (p1.y - p0.y) / tilesU,
+      (p3.x - p0.x) / tilesV,
+      (p3.y - p0.y) / tilesV,
       p0.x,
       p0.y,
     );
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(tex, 0, 0);
-    ctx.fillStyle = `rgba(8, 4, 2, ${1 - shade})`;
-    ctx.fillRect(0, 0, w, h);
+    for (let v = 0; v < tilesV; v++) {
+      for (let u = 0; u < tilesU; u++) {
+        ctx.drawImage(tex, 0, 0, tex.width, tex.height, u, v, 1, 1);
+      }
+    }
+    ctx.fillStyle = `rgba(36, 18, 10, ${Math.max(0, 0.42 - shade * 0.42)})`;
+    ctx.fillRect(0, 0, tilesU, tilesV);
     ctx.restore();
   }
 
