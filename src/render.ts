@@ -173,22 +173,37 @@ const FACES: number[][] = [
   [3, 0, 4, 7],
 ];
 
-function cropPatch(
-  src: HTMLCanvasElement,
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
-  tw: number,
-  th: number,
-): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = tw;
-  c.height = th;
-  const g = c.getContext("2d")!;
-  g.imageSmoothingEnabled = true;
-  g.drawImage(src, sx, sy, sw, sh, 0, 0, tw, th);
-  return c;
+function makeRust(src: HTMLCanvasElement, seed: number): HTMLCanvasElement {
+  const g = src.getContext("2d")!;
+  const data = g.getImageData(0, 0, src.width, src.height).data;
+  const colors: [number, number, number][] = [];
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] > 40 && data[i] + data[i + 1] + data[i + 2] > 50) {
+      colors.push([data[i], data[i + 1], data[i + 2]]);
+    }
+  }
+  const small = document.createElement("canvas");
+  small.width = 12;
+  small.height = 12;
+  const sg = small.getContext("2d")!;
+  const img = sg.createImageData(12, 12);
+  for (let i = 0; i < 144; i++) {
+    const n = Math.sin(i * 12.9898 * seed) * 43758.5453;
+    const c = colors[Math.abs(Math.floor(n)) % colors.length];
+    const o = i * 4;
+    img.data[o] = c[0];
+    img.data[o + 1] = c[1];
+    img.data[o + 2] = c[2];
+    img.data[o + 3] = 255;
+  }
+  sg.putImageData(img, 0, 0);
+  const out = document.createElement("canvas");
+  out.width = 64;
+  out.height = 64;
+  const og = out.getContext("2d")!;
+  og.imageSmoothingEnabled = true;
+  og.drawImage(small, 0, 0, 64, 64);
+  return out;
 }
 
 export class Renderer {
@@ -211,14 +226,15 @@ export class Renderer {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
     const up = this.knocked(assets.block.up);
-    const cube = this.knocked(assets.block.cube);
+    const a = makeRust(up, 1.17);
+    const b = makeRust(up, 2.63);
     this.rust = {
-      top: cropPatch(up, 86, 38, 32, 18, 64, 64),
-      sideA: cropPatch(up, 82, 54, 18, 58, 48, 128),
-      sideB: cropPatch(up, 104, 54, 20, 58, 48, 128),
-      cubeTop: cropPatch(cube, 86, 66, 32, 16, 64, 64),
-      cubeA: cropPatch(cube, 82, 82, 18, 32, 64, 64),
-      cubeB: cropPatch(cube, 104, 82, 20, 32, 64, 64),
+      top: a,
+      sideA: a,
+      sideB: b,
+      cubeTop: a,
+      cubeA: a,
+      cubeB: b,
     };
   }
 
@@ -465,17 +481,27 @@ export class Renderer {
     shade: number,
   ): void {
     const ctx = this.ctx;
-    ctx.save();
+    const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+    const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+    const grow = pts.map((p) => {
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const len = Math.hypot(dx, dy) || 1;
+      return { x: p.x + (dx / len) * 0.35, y: p.y + (dy / len) * 0.35 };
+    });
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.moveTo(grow[0].x, grow[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(grow[i].x, grow[i].y);
     ctx.closePath();
+    ctx.fillStyle = `rgb(${Math.round(118 * shade)},${Math.round(78 * shade)},${Math.round(62 * shade)})`;
+    ctx.fill();
+    ctx.save();
     ctx.clip();
     const w = tex.width;
     const h = tex.height;
-    const p0 = pts[0];
-    const p1 = pts[1];
-    const p3 = pts[3];
+    const p0 = grow[0];
+    const p1 = grow[1];
+    const p3 = grow[3];
     ctx.setTransform(
       (p1.x - p0.x) / w,
       (p1.y - p0.y) / w,
@@ -484,17 +510,11 @@ export class Renderer {
       p0.x,
       p0.y,
     );
+    ctx.imageSmoothingEnabled = true;
     ctx.drawImage(tex, 0, 0);
     ctx.fillStyle = `rgba(8, 4, 2, ${1 - shade})`;
     ctx.fillRect(0, 0, w, h);
     ctx.restore();
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.closePath();
-    ctx.strokeStyle = "rgba(22, 12, 8, 0.4)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
   }
 
   private drawBlockShadow(state: BlockState, cube: boolean, alpha: number): void {
@@ -539,12 +559,17 @@ export class Renderer {
     ctx.font = `${opts.weight ?? "700"} ${size}px ${UI_FONT}`;
     ctx.textAlign = opts.align ?? "left";
     ctx.textBaseline = "alphabetic";
-    ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
-    ctx.shadowOffsetX = 1;
-    ctx.shadowOffsetY = 1;
-    ctx.shadowBlur = 1;
+    ctx.filter = "none";
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    const tx = Math.round(x);
+    const ty = Math.round(y);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+    ctx.fillText(text, tx + 1, ty + 1);
     ctx.fillStyle = opts.color ?? "#fff8e8";
-    ctx.fillText(text, Math.round(x), Math.round(y));
+    ctx.fillText(text, tx, ty);
     ctx.restore();
   }
 
