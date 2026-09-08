@@ -365,6 +365,14 @@ function stepMenu(dir: number): void {
   }
 }
 
+function typingText(): boolean {
+  if (screen === "nameEntry" || screen === "editorSave") return true;
+  if (screen === "editor" && editorNameFocus) return true;
+  if (screen === "settings" && settingsNameFocus) return true;
+  if (screen === "creatorHub" && (creatorPage === "enterCode" || packNameFocus)) return true;
+  return false;
+}
+
 function onKey(e: KeyboardEvent): void {
   if (input.justBound) {
     input.justBound = false;
@@ -421,7 +429,7 @@ function onKey(e: KeyboardEvent): void {
     }
     return;
   }
-  if ((e.key === "m" || e.key === "M") && screen !== "editorSave") {
+  if ((e.key === "m" || e.key === "M") && !typingText()) {
     const muted = sound.toggleMute();
     if (!muted) {
       if (screen === "play" || screen === "pause") sound.startAmbient();
