@@ -1,5 +1,6 @@
 import type { Assets } from "./assets";
 import { STAGE_H, STAGE_W } from "./assets";
+import { drawPixelText } from "./font";
 import {
   H,
   occupied,
@@ -226,6 +227,11 @@ export class Renderer {
 
   clear(): void {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.filter = "none";
+    this.ctx.shadowBlur = 0;
+    this.ctx.shadowColor = "transparent";
+    this.ctx.shadowOffsetX = 0;
+    this.ctx.shadowOffsetY = 0;
     this.ctx.clearRect(0, 0, STAGE_W, STAGE_H);
   }
 
@@ -489,7 +495,6 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.save();
     ctx.globalCompositeOperation = "multiply";
-    ctx.filter = "blur(6px)";
     for (const c of cells) {
       const pts = [
         project(c.x + 0.1, c.y + 0.1, 0.02),
@@ -504,7 +509,6 @@ export class Renderer {
       ctx.fillStyle = `rgba(48, 22, 14, ${Math.min(1, alpha * 0.82)})`;
       ctx.fill();
     }
-    ctx.filter = "none";
     ctx.restore();
   }
 
@@ -544,13 +548,21 @@ export class Renderer {
   }
 
   drawHud(code: string, moves: number, tab = "Menu"): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.filter = "none";
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
     this.drawMenuTab(tab);
-    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", weight: "500", shadow: false });
-    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", weight: "500", shadow: false });
+    drawPixelText(ctx, `Passcode: ${code}`, 536, 8, "#f4f4f4", 2, "right");
+    drawPixelText(ctx, `Moves: ${String(moves).padStart(6, "0")}`, 536, 26, "#f4f4f4", 2, "right");
+    ctx.restore();
   }
 
   drawMenuTab(label = "Menu"): void {
-    this.drawUiText(label, 14, 20, { size: 13, weight: "500" });
+    this.drawUiText(label, 14, 20, { size: 13, weight: "500", shadow: false });
   }
 
   hitMenuTab(mx: number, my: number, wide = false): boolean {

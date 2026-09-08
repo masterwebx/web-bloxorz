@@ -52,9 +52,16 @@ export function drawPixelText(
   y: number,
   color: string,
   scale = 1,
+  align: "left" | "right" = "left",
 ): number {
+  ctx.save();
+  ctx.filter = "none";
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = "transparent";
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
   ctx.fillStyle = color;
-  let ox = x;
+  let ox = align === "right" ? x - (textWidth(text, scale) - scale) : x;
   for (const ch of text) {
     const g = GLYPH[ch] ?? GLYPH[" "];
     for (let row = 0; row < g.length; row++) {
@@ -66,5 +73,6 @@ export function drawPixelText(
     }
     ox += glyphWidth(ch, scale);
   }
+  ctx.restore();
   return ox;
 }
