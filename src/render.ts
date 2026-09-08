@@ -16,7 +16,7 @@ const SYX = -5;
 const SXY = 10;
 const SY = 17.5;
 const SZ = 23;
-const GROUND = 0.28;
+const GROUND = 0.52;
 const TILE_OX = -2;
 const TILE_OY = -6;
 const BG_W = 551;
@@ -371,6 +371,8 @@ export class Renderer {
     ctx.save();
     ctx.globalAlpha = alpha;
     for (const f of faces) {
+      if (f.fi === 1 && extraZ >= -0.05) continue;
+      if (f.cross < -12) continue;
       ctx.beginPath();
       ctx.moveTo(f.pts[0].x, f.pts[0].y);
       for (let i = 1; i < 4; i++) ctx.lineTo(f.pts[i].x, f.pts[i].y);
@@ -395,12 +397,12 @@ export class Renderer {
     const ctx = this.ctx;
     const sy = STAGE_H / BG_H;
     const sx = STAGE_W / BG_W;
-    const dh = 11 * sy;
-    const dw = HUD_DIGIT_W * (dh / HUD_DIGIT_H);
-    const x = 476 * sx;
-    this.drawSpriteDigits(this.assets.ui.hudDigits, code, x, 8 * sy, dw, dh);
-    this.drawSpriteDigits(this.assets.ui.hudDigits, String(moves), x, 22.5 * sy, dw, dh);
     ctx.save();
+    ctx.font = "bold 13px Courier New, monospace";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#1a120c";
+    ctx.fillText(code, 478 * sx, 16.2 * sy);
+    ctx.fillText(String(moves), 478 * sx, 31.2 * sy);
     ctx.font = "11px Trebuchet MS, sans-serif";
     ctx.textAlign = "right";
     ctx.fillStyle = "rgba(255,200,140,0.7)";

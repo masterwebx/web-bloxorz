@@ -165,7 +165,7 @@ function keyDir(key: string): Dir | null {
 }
 
 function onKey(e: KeyboardEvent): void {
-  if (e.repeat && screen === "play") return;
+  if (e.repeat && (screen === "play" || screen === "publisher" || screen === "author")) return;
   if (screen === "boot") {
     unlock();
     return;
@@ -206,7 +206,7 @@ function onKey(e: KeyboardEvent): void {
   }
 
   if (screen === "publisher" || screen === "author") {
-    advanceSplash();
+    if (!e.repeat && splashT >= 1.25) advanceSplash();
     return;
   }
 
@@ -429,7 +429,7 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "publisher" || screen === "author") {
-    advanceSplash();
+    if (splashT >= 1.25) advanceSplash();
     return;
   }
   if (screen === "credits") {
@@ -528,15 +528,14 @@ function update(dt: number): void {
 
   if (screen === "publisher") {
     splashT += dt;
-    if (splashT > 2.6) {
+    if (splashT > 3.1) {
       screen = "author";
       splashT = 0;
       sound.play("splash", { volume: 0.7 });
     }
-  }
-  if (screen === "author") {
+  } else if (screen === "author") {
     splashT += dt;
-    if (splashT > 3.2) {
+    if (splashT > 4.2) {
       screen = "menu";
       sound.startMenu();
     }
@@ -587,9 +586,11 @@ function draw(): void {
 
   if (screen === "publisher" || screen === "author") {
     const fade =
-      splashT < 0.25 ? splashT / 0.25 : splashT > (screen === "publisher" ? 2.3 : 2.9)
-        ? Math.max(0, ((screen === "publisher" ? 2.6 : 3.2) - splashT) / 0.3)
-        : 1;
+      splashT < 0.28
+        ? splashT / 0.28
+        : splashT > (screen === "publisher" ? 2.8 : 3.9)
+          ? Math.max(0, ((screen === "publisher" ? 3.1 : 4.2) - splashT) / 0.3)
+          : 1;
     if (screen === "publisher") renderer.drawPublisherSplash(fade);
     else renderer.drawAuthorCard(fade);
     return;
