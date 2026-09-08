@@ -123,6 +123,9 @@ const BILLBOARD: Record<string, string[]> = {
   "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
   "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
   "9": ["01110", "10001", "10001", "01111", "00001", "00001", "01110"],
+  " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
+  "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+  ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
 };
 
 function ease(t: number): number {
@@ -330,7 +333,11 @@ function isFloorFace(corners: [number, number, number][], idx: number[]): boolea
   return avgZ < GROUND + 0.18 && nz < 0;
 }
 
-/** Original stage art already paints Passcode/Moves into the bitmap. Wipe that under-layer. */
+function clampByte(n: number): number {
+  return Math.max(0, Math.min(255, Math.round(n)));
+}
+
+/** Erase baked Passcode/Moves glyphs by continuing the sky gradient — no flat panel. */
 function scrubBakedHud(img: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = STAGE_W;
@@ -339,23 +346,31 @@ function scrubBakedHud(img: HTMLImageElement): HTMLCanvasElement {
   g.drawImage(img, 0, 0, STAGE_W, STAGE_H);
   const data = g.getImageData(0, 0, STAGE_W, STAGE_H);
   const px = data.data;
-  const x0 = Math.floor((248 * STAGE_W) / img.width);
-  const x1 = STAGE_W;
-  const y0 = 0;
-  const y1 = Math.min(STAGE_H, Math.ceil((92 * STAGE_H) / img.height));
-  const sampleX = Math.max(0, Math.floor((168 * STAGE_W) / img.width));
-  for (let y = y0; y < y1; y++) {
-    const si = (y * STAGE_W + sampleX) * 4;
-    const r = px[si];
-    const gv = px[si + 1];
-    const b = px[si + 2];
-    const a = px[si + 3];
-    for (let x = x0; x < x1; x++) {
+  const x0 = Math.floor((320 * STAGE_W) / img.width);
+  const y1 = Math.min(STAGE_H, Math.ceil((50 * STAGE_H) / img.height));
+  const xA = Math.max(0, Math.floor((240 * STAGE_W) / img.width));
+  const xB = Math.max(0, Math.floor((310 * STAGE_W) / img.width));
+  const span = Math.max(1, xB - xA);
+  const fadeStart = Math.max(0, y1 - 8);
+  for (let y = 0; y < y1; y++) {
+    const ia = (y * STAGE_W + xA) * 4;
+    const ib = (y * STAGE_W + xB) * 4;
+    const dr = (px[ib] - px[ia]) / span;
+    const dg = (px[ib + 1] - px[ia + 1]) / span;
+    const db = (px[ib + 2] - px[ia + 2]) / span;
+    const da = (px[ib + 3] - px[ia + 3]) / span;
+    const fade = y < fadeStart ? 1 : 1 - (y - fadeStart) / (y1 - fadeStart);
+    for (let x = x0; x < STAGE_W; x++) {
+      const t = x - xA;
       const i = (y * STAGE_W + x) * 4;
-      px[i] = r;
-      px[i + 1] = gv;
-      px[i + 2] = b;
-      px[i + 3] = a;
+      const nr = clampByte(px[ia] + dr * t);
+      const ng = clampByte(px[ia + 1] + dg * t);
+      const nb = clampByte(px[ia + 2] + db * t);
+      const na = clampByte(px[ia + 3] + da * t);
+      px[i] = clampByte(px[i] + (nr - px[i]) * fade);
+      px[i + 1] = clampByte(px[i + 1] + (ng - px[i + 1]) * fade);
+      px[i + 2] = clampByte(px[i + 2] + (nb - px[i + 2]) * fade);
+      px[i + 3] = clampByte(px[i + 3] + (na - px[i + 3]) * fade);
     }
   }
   g.putImageData(data, 0, 0);
@@ -384,7 +399,6 @@ export class Renderer {
   private rustEnd: HTMLCanvasElement;
   private rustSide: HTMLCanvasElement;
   private levelBg: HTMLCanvasElement;
-  private hudSky = "rgb(196, 158, 104)";
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -401,8 +415,6 @@ export class Renderer {
     this.rustEnd = unprojectQuad(up, faceQuad(stand, FACES[0], so.x, so.y), 96, 96);
     this.rustSide = unprojectQuad(flat, faceQuad(lie, FACES[0], fo.x, fo.y), 96, 192);
     this.levelBg = scrubBakedHud(assets.ui.levelBg);
-    const sample = this.levelBg.getContext("2d")!.getImageData(168, 10, 1, 1).data;
-    this.hudSky = `rgb(${sample[0]}, ${sample[1]}, ${sample[2]})`;
   }
 
   private knocked(img: HTMLImageElement): HTMLCanvasElement {
@@ -730,7 +742,7 @@ export class Renderer {
     const hot = !!opts.hot;
     const size = (opts.size ?? 15) * (hot ? 1.08 : 1);
     ctx.save();
-    ctx.font = `${opts.weight ?? "700"} ${size}px ${UI_FONT}`;
+    ctx.font = `700 ${size}px ${UI_FONT}`;
     ctx.textAlign = opts.align ?? "left";
     ctx.textBaseline = "alphabetic";
     ctx.filter = "none";
@@ -749,25 +761,19 @@ export class Renderer {
     }
     const tx = Math.round(x);
     const ty = Math.round(y);
-    ctx.fillStyle = opts.color ?? "#111";
+    ctx.fillStyle = opts.color ?? "#fff8e8";
     ctx.fillText(text, tx, ty);
     ctx.restore();
   }
 
   drawHud(code: string, moves: number, tab = "Menu", tabHot = false): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = this.hudSky;
-    ctx.fillRect(252, 0, STAGE_W - 252, 48);
-    ctx.restore();
     this.drawMenuTab(tab, tabHot);
-    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", weight: "500", color: "#111" });
-    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", weight: "500", color: "#111" });
+    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", color: "#111" });
+    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", color: "#111" });
   }
 
   drawMenuTab(label = "Menu", hot = false): void {
-    this.drawUiText(label, 14, 20, { size: 13, weight: "500", color: "#111", hot });
+    this.drawUiText(label, 14, 20, { size: 13, color: "#111", hot });
   }
 
   hitMenuTab(mx: number, my: number, wide = false): boolean {
@@ -780,32 +786,32 @@ export class Renderer {
     ctx.globalAlpha = alpha;
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
-    this.drawUiText(title, STAGE_W / 2 + shake.x, subtitle ? 200 + shake.y : 214 + shake.y, {
-      size: title.length > 16 ? 26 : 36,
-      align: "center",
-      color: "#fff8e8",
-    });
+    const label = title.toUpperCase().replace(/[^A-Z0-9 .\-]/g, " ");
+    const maxW = 500;
+    const w = this.logoWidth(label, maxW);
+    const pitch = Math.min(5.5, maxW / (Math.max(1, label.length) * 6));
+    const y = (subtitle ? 168 : 186) + shake.y;
+    this.drawLogo(STAGE_W / 2 - w / 2 + shake.x, y, label, 1, 1, 0, maxW);
     if (subtitle) {
-      this.drawUiText(subtitle, STAGE_W / 2 + shake.x, 248 + shake.y, {
+      this.drawUiText(subtitle, STAGE_W / 2 + shake.x, y + 7 * pitch + 36, {
         size: 16,
         align: "center",
-        weight: "500",
-        color: "#ffc37a",
+        color: "#fff8e8",
       });
     }
     ctx.restore();
   }
 
-  logoWidth(text: string): number {
-    const letters = text || "BLOXORZ";
-    const pitch = Math.min(5.5, 300 / (letters.length * 6));
+  logoWidth(text: string, maxWidth = 300): number {
+    const letters = (text || "BLOXORZ").toUpperCase();
+    const pitch = Math.min(5.5, maxWidth / (Math.max(1, letters.length) * 6));
     return letters.length * 6 * pitch;
   }
 
-  drawLogo(x: number, y: number, text = "BLOXORZ", neonR = 1, neonZ = 1, glitch = 0): number {
+  drawLogo(x: number, y: number, text = "BLOXORZ", neonR = 1, neonZ = 1, glitch = 0, maxWidth = 300): number {
     const ctx = this.ctx;
     const letters = text.toUpperCase();
-    const pitch = Math.min(5.5, 300 / (Math.max(1, letters.length) * 6));
+    const pitch = Math.min(5.5, maxWidth / (Math.max(1, letters.length) * 6));
     const radius = 2.25;
     ctx.save();
     ctx.translate(x + glitch, y);
@@ -860,9 +866,9 @@ export class Renderer {
       const hot = !dim && (hover === i || (hover === null && selected === i));
       this.ctx.save();
       this.ctx.globalAlpha = dim ? 0.32 : 1;
-      if (selected === i && !dim) this.drawUiText(">", MENU_X - 16, y + 16, { size: 14, hot, color: "#111" });
-      this.drawUiText(label, MENU_X + 4, y + 16, { size: 14, hot, color: "#111" });
-      if (i === 5) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 14, hot, color: "#111" });
+      if (selected === i && !dim) this.drawUiText(">", MENU_X - 16, y + 16, { size: 14, hot });
+      this.drawUiText(label, MENU_X + 4, y + 16, { size: 14, hot });
+      if (i === 5) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 14, hot });
       this.ctx.restore();
     });
   }
@@ -1194,7 +1200,7 @@ export class Renderer {
     ctx.strokeRect(12.5, 6.5, 299, 21);
     ctx.restore();
     const shown = nameFocus ? `Name: ${name}_` : `Name: ${name}`;
-    this.drawUiText(shown, 20, 22, { size: 13, color: nameFocus ? "#fff4d6" : "#111", hot: nameFocus });
+    this.drawUiText(shown, 20, 22, { size: 13, hot: nameFocus });
     this.drawUiText("Test", 430, 22, { size: 13, hot: headerHot === "test" });
     this.drawUiText("Back", 510, 22, { size: 13, hot: headerHot === "back" });
     const ox = 36;
