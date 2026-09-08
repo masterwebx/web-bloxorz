@@ -228,7 +228,10 @@ function onKey(e: KeyboardEvent): void {
     return;
   }
 
-  if (screen === "title") return;
+  if (screen === "title") {
+    if (titleT > 0.35) enterPlay();
+    return;
+  }
 
   if (screen === "complete") {
     if (e.key === "Enter" || e.key === " ") {

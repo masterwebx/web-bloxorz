@@ -43,6 +43,10 @@ npm run build
 npm run preview
 ```
 
+## Deploy
+
+This is a static Vite app. Vercel can host it with the included `vercel.json`. GitHub Pages also works: after the repo is on GitHub, the workflow in `.github/workflows/deploy-pages.yml` builds `main` and publishes it.
+
 ## Credits
 
 - Original game: Damien Clarke, DX Interactive, 2007
