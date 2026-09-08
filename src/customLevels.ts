@@ -83,9 +83,10 @@ export function deleteStage(code: string): void {
 }
 
 export function isPlayable(def: LevelDef): string | null {
-  const hasEnd = def.tiles.some((r) => r.includes("e"));
+  const exits = def.tiles.reduce((n, r) => n + [...r].filter((c) => c === "e").length, 0);
   const hasStone = def.tiles.some((r) => /[bshfvlrkq]/.test(r));
-  if (!hasEnd) return "Place an exit hole.";
+  if (exits === 0) return "Place an exit hole.";
+  if (exits > 1) return "Only one exit is allowed.";
   if (!hasStone) return "Paint some tiles.";
   const [sx, sy] = def.spawn;
   const ch = tileChar(def, sx, sy);

@@ -6,7 +6,6 @@ import {
   type Anim,
   type BlockState,
   type Cell,
-  type Dir,
   type Stage,
   type Tile,
   W,
@@ -17,7 +16,6 @@ const SYX = -5;
 const SXY = 10;
 const SY = 17.5;
 const SZ = 23;
-const GROUND = 0.04;
 const TILE_OX = -2;
 const TILE_OY = -6;
 const MENU_X = 42;
@@ -83,91 +81,14 @@ export function fitCamera(stage: Stage): Camera {
   };
 }
 
-function rotateAround(
-  p: [number, number, number],
-  origin: [number, number, number],
-  axis: [number, number, number],
-  angle: number,
-): [number, number, number] {
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  const [ox, oy, oz] = origin;
-  const x = p[0] - ox;
-  const y = p[1] - oy;
-  const z = p[2] - oz;
-  const [ax, ay, az] = axis;
-  const dot = x * ax + y * ay + z * az;
-  const cx = ay * z - az * y;
-  const cy = az * x - ax * z;
-  const cz = ax * y - ay * x;
-  return [
-    ox + x * c + cx * s + ax * dot * (1 - c),
-    oy + y * c + cy * s + ay * dot * (1 - c),
-    oz + z * c + cz * s + az * dot * (1 - c),
-  ];
-}
-
-export function boxFor(block: BlockState, cube = false): { x: number; y: number; z: number; w: number; d: number; h: number } {
-  if (cube) return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 1 };
-  if (block.ori === "up") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 2 };
-  if (block.ori === "forward") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 2, h: 1 };
-  return { x: block.x, y: block.y, z: GROUND, w: 2, d: 1, h: 1 };
-}
-
-function rollSpec(from: BlockState, dir: Dir, cube: boolean): {
-  origin: [number, number, number];
-  axis: [number, number, number];
-  angle: number;
-} {
-  const b = boxFor(from, cube);
-  const z = b.z;
-  if (dir === "right") {
-    return { origin: [b.x + b.w, b.y, z], axis: [0, 1, 0], angle: Math.PI / 2 };
-  }
-  if (dir === "left") {
-    return { origin: [b.x, b.y, z], axis: [0, 1, 0], angle: -Math.PI / 2 };
-  }
-  if (dir === "down") {
-    return { origin: [b.x, b.y + b.d, z], axis: [1, 0, 0], angle: -Math.PI / 2 };
-  }
-  return { origin: [b.x, b.y, z], axis: [1, 0, 0], angle: Math.PI / 2 };
-}
-
-function boxCorners(
-  box: { x: number; y: number; z: number; w: number; d: number; h: number },
-  roll?: { origin: [number, number, number]; axis: [number, number, number]; angle: number },
-): [number, number, number][] {
-  const pts: [number, number, number][] = [
-    [box.x, box.y, box.z],
-    [box.x + box.w, box.y, box.z],
-    [box.x + box.w, box.y + box.d, box.z],
-    [box.x, box.y + box.d, box.z],
-    [box.x, box.y, box.z + box.h],
-    [box.x + box.w, box.y, box.z + box.h],
-    [box.x + box.w, box.y + box.d, box.z + box.h],
-    [box.x, box.y + box.d, box.z + box.h],
-  ];
-  if (!roll) return pts;
-  return pts.map((p) => rotateAround(p, roll.origin, roll.axis, roll.angle));
-}
-
-const FACES: number[][] = [
-  [4, 5, 6, 7],
-  [0, 3, 2, 1],
-  [0, 1, 5, 4],
-  [1, 2, 6, 5],
-  [2, 3, 7, 6],
-  [3, 0, 4, 7],
-];
-
-const FACE_COL = [
-  [196, 132, 108],
-  [42, 32, 30],
-  [118, 82, 68],
-  [88, 62, 52],
-  [70, 50, 42],
-  [150, 96, 78],
-];
+const BILLBOARD: Record<string, string[]> = {
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  X: ["10001", "01010", "01010", "00100", "01010", "01010", "10001"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  Z: ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
+};
 
 function ease(t: number): number {
   return 0.5 - 0.5 * Math.cos(Math.min(1, Math.max(0, t)) * Math.PI);
@@ -376,75 +297,26 @@ export class Renderer {
       this.drawBlockSprite(st, true, (1 - t) * 130);
       return;
     }
-    const ctx = this.ctx;
-    let extraZ = 0;
-    let alpha = 1;
-    let roll: { origin: [number, number, number]; axis: [number, number, number]; angle: number } | undefined;
-    let boxState = state;
-
     if (anim?.kind === "roll" && anim.dir) {
-      const t = ease(anim.t / anim.dur);
       const from = anim.from;
-      boxState = from;
-      const spec = rollSpec(from, anim.dir, cube);
-      roll = { ...spec, angle: spec.angle * t };
-    } else if (anim?.kind === "fall") {
-      const t = anim.t / anim.dur;
-      extraZ = -t * t * 9;
-      alpha = 1 - t * 0.9;
-      if (anim.dir) {
-        const spec = rollSpec(anim.from, anim.dir, cube);
-        roll = { ...spec, angle: spec.angle * (1 + 0.4 * t) };
-      }
-      boxState = anim.from;
-    } else if (anim?.kind === "sink") {
+      const fi = Math.min(7, Math.floor((anim.t / anim.dur) * 8));
+      const pack = cube ? this.assets.block.rolls.cube : this.assets.block.rolls[from.ori];
+      this.drawBlockShadow(from, cube, 0.38);
+      this.drawBlockSprite(from, cube, 0, 1, pack[anim.dir][fi]);
+      return;
+    }
+    if (anim?.kind === "sink") {
       const t = ease(anim.t / anim.dur);
-      extraZ = -t * 2.2;
-      alpha = 1 - t;
-      boxState = anim.from;
+      const fi = Math.min(7, Math.floor((anim.t / anim.dur) * 8));
+      this.drawBlockShadow(anim.from, cube, 0.22 * (1 - t));
+      this.drawBlockSprite(anim.from, cube, 0, 1, this.assets.block.sink[fi]);
+      return;
     }
-
-    const box = boxFor(boxState, cube);
-    const corners = boxCorners(box, roll);
-    if (extraZ !== 0) {
-      for (const c of corners) c[2] += extraZ;
+    if (anim?.kind === "fall") {
+      const t = anim.t / anim.dur;
+      this.drawBlockShadow(anim.from, cube, 0.15 * (1 - t));
+      this.drawBlockSprite(anim.from, cube, -t * t * 210, 1 - t * 0.85);
     }
-    const screen = corners.map((c) => {
-      const p = project(c[0], c[1], c[2]);
-      return { x: this.cam.x + p.x, y: this.cam.y + p.y, z: c[2], d: p.y };
-    });
-
-    const faces = FACES.map((idx, fi) => {
-      const pts = idx.map((i) => screen[i]);
-      const ax = pts[1].x - pts[0].x;
-      const ay = pts[1].y - pts[0].y;
-      const bx = pts[2].x - pts[1].x;
-      const by = pts[2].y - pts[1].y;
-      const cross = ax * by - ay * bx;
-      const depth = (pts[0].d + pts[1].d + pts[2].d + pts[3].d) / 4;
-      return { pts, cross, depth, fi };
-    }).sort((a, b) => a.depth - b.depth);
-
-    ctx.save();
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    this.drawBlockShadow(boxState, cube, anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38);
-    for (const f of faces) {
-      if (f.cross <= 0) continue;
-      if (f.fi === 1 && extraZ >= -0.08) continue;
-      ctx.beginPath();
-      ctx.moveTo(f.pts[0].x, f.pts[0].y);
-      for (let i = 1; i < 4; i++) ctx.lineTo(f.pts[i].x, f.pts[i].y);
-      ctx.closePath();
-      const [r, g, b] = FACE_COL[f.fi];
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fill();
-      ctx.strokeStyle = "rgba(22,12,8,0.55)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   private drawBlockShadow(state: BlockState, cube: boolean, alpha: number): void {
@@ -471,14 +343,20 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawBlockSprite(state: BlockState, cube: boolean, lift = 0): void {
-    const img = cube
+  private drawBlockSprite(
+    state: BlockState,
+    cube: boolean,
+    lift = 0,
+    alpha = 1,
+    img?: HTMLImageElement,
+  ): void {
+    const sprite = img ?? (cube
       ? this.assets.block.cube
       : state.ori === "up"
         ? this.assets.block.up
         : state.ori === "forward"
           ? this.assets.block.forward
-          : this.assets.block.right;
+          : this.assets.block.right);
     const p = project(state.x, state.y, 0);
     const foot =
       cube || state.ori === "up"
@@ -488,21 +366,10 @@ export class Renderer {
           : { ax: 124, ay: 109, sx: 16, sy: 21 };
     const x = this.cam.x + p.x + foot.sx - foot.ax;
     const y = this.cam.y + p.y + foot.sy - foot.ay - lift;
-    this.ctx.drawImage(this.knocked(img), x, y);
-  }
-
-  private drawGlowBlob(cx: number, cy: number, rx: number, ry: number, alpha = 0.5): void {
-    const ctx = this.ctx;
-    ctx.save();
-    const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, Math.max(rx, ry));
-    g.addColorStop(0, `rgba(255, 150, 50, ${alpha})`);
-    g.addColorStop(0.4, `rgba(220, 80, 16, ${alpha * 0.45})`);
-    g.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    this.ctx.save();
+    this.ctx.globalAlpha = alpha;
+    this.ctx.drawImage(this.knocked(sprite), x, y);
+    this.ctx.restore();
   }
 
   private drawUiText(
@@ -513,8 +380,6 @@ export class Renderer {
       size?: number;
       color?: string;
       glow?: boolean;
-      glowBlur?: number;
-      blob?: boolean;
       align?: CanvasTextAlign;
       weight?: string;
     } = {},
@@ -525,49 +390,23 @@ export class Renderer {
     ctx.font = `${opts.weight ?? "700"} ${size}px ${UI_FONT}`;
     ctx.textAlign = opts.align ?? "left";
     ctx.textBaseline = "alphabetic";
-    const w = ctx.measureText(text).width;
-    const cx = opts.align === "center" ? x : opts.align === "right" ? x - w / 2 : x + w / 2;
-    const cy = y - size * 0.35;
-    if (opts.blob || opts.glow) {
-      this.drawGlowBlob(cx, cy, Math.max(28, w * 0.62 + 16), size * 0.95, opts.blob ? 0.62 : 0.38);
-    }
-    ctx.shadowColor = "transparent";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.82)";
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
     ctx.shadowBlur = 0;
-    ctx.fillStyle = opts.color ?? "#ffffff";
+    ctx.fillStyle = opts.color ?? "#fff8e8";
     ctx.fillText(text, x, y);
     ctx.restore();
   }
 
   drawHud(code: string, moves: number, tab = "Menu"): void {
     this.drawMenuTab(tab);
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.font = `500 12px ${UI_FONT}`;
-    ctx.textAlign = "right";
-    ctx.textBaseline = "alphabetic";
-    ctx.shadowColor = "rgba(255, 150, 50, 0.9)";
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.fillStyle = "#1a0c06";
-    ctx.fillText(`Passcode: ${code}`, 536, 18);
-    ctx.fillText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36);
-    ctx.restore();
+    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 12, align: "right", weight: "500" });
+    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 12, align: "right", weight: "500" });
   }
 
   drawMenuTab(label = "Menu"): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.font = `500 13px ${UI_FONT}`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    ctx.shadowColor = "rgba(255, 150, 50, 0.95)";
-    ctx.shadowBlur = 18;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.fillStyle = "#1a0c06";
-    ctx.fillText(label, 14, 20);
-    ctx.restore();
+    this.drawUiText(label, 14, 20, { size: 13, weight: "500" });
   }
 
   hitMenuTab(mx: number, my: number, wide = false): boolean {
@@ -589,9 +428,38 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawLogo(frame: number, x: number, y: number, glitch = 0): void {
-    const img = this.assets.ui.logo[Math.max(0, Math.min(5, frame))];
-    this.ctx.drawImage(this.knocked(img), x + glitch, y);
+  drawLogo(x: number, y: number, neonR = 1, neonZ = 1, glitch = 0): void {
+    const ctx = this.ctx;
+    const pitch = 5.4;
+    const radius = 2.05;
+    const letters = "BLOXORZ";
+    ctx.save();
+    ctx.translate(x + glitch, y);
+    letters.split("").forEach((ch, li) => {
+      const glyph = BILLBOARD[ch];
+      const on = ch === "R" ? neonR : ch === "Z" ? neonZ : 1;
+      const ox = li * (5 + 1) * pitch;
+      for (let row = 0; row < 7; row++) {
+        for (let col = 0; col < 5; col++) {
+          if (glyph[row][col] !== "1") continue;
+          const bx = ox + col * pitch + 2.2;
+          const by = row * pitch + 2.2;
+          const g = ctx.createRadialGradient(bx, by, 0, bx, by, 5.2);
+          g.addColorStop(0, `rgba(255, 236, 190, ${0.95 * on})`);
+          g.addColorStop(0.38, `rgba(255, 168, 64, ${0.72 * on})`);
+          g.addColorStop(1, "rgba(255, 110, 16, 0)");
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(bx, by, 5.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255, 248, 230, ${0.35 + 0.65 * on})`;
+          ctx.beginPath();
+          ctx.arc(bx, by, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+    ctx.restore();
   }
 
   drawMenuButtons(
@@ -842,10 +710,6 @@ export class Renderer {
     this.drawUiText("Press Enter or click to return to the menu", STAGE_W / 2, 310, { size: 13, glow: true, align: "center", color: "#ffb060" });
   }
 
-  menuHitLogoArea(): void {
-    /* layout helper kept for hit testing in main */
-  }
-
   hitPause(mx: number, my: number): number | null {
     if (mx < 28 || mx > 264 || my < 142 || my > 286) return null;
     return Math.max(0, Math.min(3, Math.floor((my - 142) / 32)));
@@ -890,8 +754,19 @@ export class Renderer {
     tool: string,
     tools: string[],
     hint: string,
+    name: string,
+    nameFocus: boolean,
   ): void {
-    this.drawUiText("Create Stage", 16, 22, { size: 14, glow: true });
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = nameFocus ? "rgba(60, 28, 12, 0.72)" : "rgba(32, 16, 8, 0.55)";
+    ctx.fillRect(12, 6, 300, 22);
+    ctx.strokeStyle = nameFocus ? "#ffcc88" : "rgba(255, 196, 120, 0.5)";
+    ctx.lineWidth = nameFocus ? 1.5 : 1;
+    ctx.strokeRect(12.5, 6.5, 299, 21);
+    ctx.restore();
+    const shown = nameFocus ? `Name: ${name}_` : `Name: ${name}`;
+    this.drawUiText(shown, 20, 22, { size: 13, glow: true, color: nameFocus ? "#fff4d6" : "#ffe0b0" });
     this.drawUiText("Test", 430, 22, { size: 13, glow: true });
     this.drawUiText("Back", 510, 22, { size: 13, glow: true });
     const ox = 36;
@@ -940,6 +815,10 @@ export class Renderer {
     return null;
   }
 
+  hitEditorName(mx: number, my: number): boolean {
+    return mx >= 12 && mx <= 312 && my >= 6 && my <= 28;
+  }
+
   hitSettings(mx: number, my: number, count: number): { row: number; side: "left" | "right" } | null {
     if (mx < 24 || mx > 530) return null;
     const i = Math.floor((my - (SETTINGS_Y - 12)) / SETTINGS_GAP);
@@ -976,7 +855,7 @@ export class Renderer {
 
   drawSavePrompt(code: string, msg: string): void {
     this.drawUiText("Stage beaten — it can be saved.", 275, 160, { size: 16, glow: true, align: "center" });
-    this.drawUiText(msg, 275, 190, { size: 13, glow: true, align: "center" });
+    this.drawUiText(`Name: ${msg}_`, 275, 190, { size: 13, glow: true, align: "center" });
     this.drawUiText("Save & Copy Code", 275, 230, { size: 15, glow: true, align: "center" });
     this.drawUiText("Keep Editing", 275, 258, { size: 15, glow: true, align: "center" });
     this.drawUiText(code.length > 48 ? `${code.slice(0, 42)}…` : code, 275, 300, {

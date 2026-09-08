@@ -7,6 +7,8 @@ export function assetUrl(path: string): string {
   return `${prefix}${path.replace(/^\//, "")}`;
 }
 
+type Dir = "up" | "down" | "left" | "right";
+
 export interface Assets {
   tiles: {
     stone: HTMLImageElement;
@@ -60,8 +62,40 @@ export interface Assets {
     right: HTMLImageElement;
     cube: HTMLImageElement;
     spin: HTMLImageElement[];
+    rolls: Record<"up" | "forward" | "right" | "cube", Record<Dir, HTMLImageElement[]>>;
+    sink: HTMLImageElement[];
   };
 }
+
+/** Original SWF character IDs: FORWARD, RIGHT, BACK, LEFT. */
+export const ROLL_IDS: Record<"up" | "forward" | "right" | "cube", Record<Dir, number[]>> = {
+  up: {
+    up: [835, 837, 839, 841, 843, 845, 847, 849],
+    right: [855, 857, 859, 861, 863, 865, 867, 869],
+    down: [875, 877, 879, 881, 883, 885, 887, 889],
+    left: [102, 104, 106, 108, 110, 112, 60, 62],
+  },
+  forward: {
+    up: [915, 917, 919, 921, 923, 925, 927, 929],
+    right: [935, 937, 939, 941, 943, 945, 947, 949],
+    down: [955, 957, 959, 961, 963, 965, 967, 969],
+    left: [895, 897, 899, 901, 903, 905, 907, 909],
+  },
+  right: {
+    up: [66, 68, 70, 72, 74, 76, 78, 80],
+    right: [979, 981, 983, 985, 987, 989, 991, 993],
+    down: [1001, 1003, 1005, 1007, 1009, 1011, 1013, 1015],
+    left: [84, 86, 88, 90, 92, 94, 96, 98],
+  },
+  cube: {
+    up: [732, 734, 736, 738, 740, 742, 744, 746],
+    right: [752, 754, 756, 758, 760, 762, 764, 766],
+    down: [772, 774, 776, 778, 780, 782, 784, 786],
+    left: [712, 714, 716, 718, 720, 722, 724, 726],
+  },
+};
+
+export const SINK_IDS = [1134, 1137, 1139, 1141, 1143, 1145, 1147, 1149];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -166,6 +200,12 @@ export async function loadAssets(): Promise<Assets> {
     ...[300, 302, 304, 306, 308, 310, 312, 314].map((id) =>
       loadImage(assetUrl(`assets/bridges/${id}.png`)),
     ),
+    ...(["up", "forward", "right", "cube"] as const).flatMap((ori) =>
+      (["up", "right", "down", "left"] as const).flatMap((dir) =>
+        ROLL_IDS[ori][dir].map((id) => loadImage(assetUrl(`assets/block/${id}.png`))),
+      ),
+    ),
+    ...SINK_IDS.map((id) => loadImage(assetUrl(`assets/block/${id}.png`))),
   ]);
 
   const logo = rest.slice(0, 6);
@@ -174,6 +214,14 @@ export async function loadAssets(): Promise<Assets> {
   const spin = [up, ...rest.slice(24, 32)];
   const bridgeL = rest.slice(32, 40);
   const bridgeR = rest.slice(40, 48);
+  let i = 48;
+  const pack = () => {
+    const dirs = { up: rest.slice(i, i + 8), right: rest.slice(i + 8, i + 16), down: rest.slice(i + 16, i + 24), left: rest.slice(i + 24, i + 32) };
+    i += 32;
+    return dirs;
+  };
+  const rolls = { up: pack(), forward: pack(), right: pack(), cube: pack() };
+  const sink = rest.slice(i, i + 8);
 
   return {
     tiles: { stone, end, soft, heavy, fragile, split },
@@ -206,7 +254,7 @@ export async function loadAssets(): Promise<Assets> {
     splash: { presented, addicting, tagline, author },
     tutorial,
     tutorialText,
-    block: { up, forward, right, cube, spin },
+    block: { up, forward, right, cube, spin, rolls, sink },
     bridges: { l: bridgeL, r: bridgeR },
   };
 }

@@ -75,8 +75,8 @@ let pauseSlide = 0;
 let levelIndex = 0;
 let stage: Stage | null = null;
 let titleT = 0;
-let logoFrame = 5;
-let logoTick = 0;
+let logoNeonR = 1;
+let logoNeonZ = 1;
 let glitchX = 0;
 let sessionMoves = 0;
 let sessionFails = 0;
@@ -94,6 +94,7 @@ let settingsIndex = 0;
 let creatorIndex = 0;
 let draft: LevelDef = emptyDraft();
 let editorName = "My Stage";
+let editorNameFocus = false;
 let editorTool = "stone";
 let editorHint = "Paint tiles, then Test. You must beat a stage to save it.";
 let linkFrom: { x: number; y: number } | null = null;
@@ -316,7 +317,29 @@ function onKey(e: KeyboardEvent): void {
     unlock();
     return;
   }
-  if (e.key === "m" || e.key === "M") {
+  if (screen === "editor" && editorNameFocus) {
+    if (e.key === "Escape") {
+      editorNameFocus = false;
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Enter") {
+      editorNameFocus = false;
+      startEditorTest();
+      return;
+    }
+    if (e.key === "Backspace") {
+      editorName = editorName.slice(0, -1);
+      e.preventDefault();
+      return;
+    }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && editorName.length < 24) {
+      editorName += e.key;
+      e.preventDefault();
+    }
+    return;
+  }
+  if ((e.key === "m" || e.key === "M") && screen !== "editorSave") {
     const muted = sound.toggleMute();
     if (!muted) {
       if (screen === "play" || screen === "pause") sound.startAmbient();
@@ -680,8 +703,9 @@ function chooseCreator(i: number): void {
   if (i === 0) {
     draft = emptyDraft();
     editorName = "My Stage";
+    editorNameFocus = false;
     editorTool = "stone";
-    editorHint = "Paint tiles, then Test. You must beat a stage to save it.";
+    editorHint = "Click the name field to rename. One spawn and one exit.";
     linkFrom = null;
     splitStep = 0;
     screen = "editor";
@@ -775,6 +799,16 @@ function paintCell(x: number, y: number): void {
       splitStep = 0;
       splitAt = null;
       editorHint = "Split destinations set.";
+      return;
+    }
+    if (tool.ch === "e") {
+      for (let yy = 0; yy < 10; yy++) {
+        for (let xx = 0; xx < 15; xx++) {
+          if (tileChar(draft, xx, yy) === "e") setTile(draft, xx, yy, " ");
+        }
+      }
+      setTile(draft, x, y, "e");
+      editorHint = "Exit set. Only one exit can be placed.";
       return;
     }
     setTile(draft, x, y, tool.ch);
@@ -974,6 +1008,12 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "editor") {
+    if (renderer.hitEditorName(p.x, p.y)) {
+      editorNameFocus = true;
+      sound.play("hover");
+      return;
+    }
+    editorNameFocus = false;
     const head = renderer.hitEditorHeader(p.x, p.y);
     if (head === "test") {
       startEditorTest();
@@ -1033,16 +1073,56 @@ canvas.addEventListener("pointerup", () => {
   paintHeld = false;
 });
 
+function pointerOverHit(p: { x: number; y: number }): boolean {
+  switch (screen) {
+    case "menu": {
+      const hit = renderer.hitMenu(p.x, p.y, MENU_Y, MENU_COUNT);
+      if (hit === 1 && resumeAt === null) return false;
+      return hit !== null;
+    }
+    case "ask":
+      return renderer.hitAsk(p.x, p.y) !== null;
+    case "load":
+      if (p.y > STAGE_H - 48 && p.x < 180) return true;
+      return loadCode.length === 6 && p.y > 280 && p.y < 330;
+    case "tutorial": {
+      const nav = renderer.hitTutorialNav(p.x, p.y);
+      if (nav === "back" && tutorialSlide === 0) return false;
+      return nav !== null;
+    }
+    case "play":
+      return renderer.hitMenuTab(p.x, p.y, playMode === "editor-test");
+    case "pause":
+      return renderer.hitPause(p.x, p.y) !== null || renderer.hitMenuTab(p.x, p.y);
+    case "settings":
+      return renderer.hitSettings(p.x, p.y, settingsRows().length) !== null;
+    case "creatorHub":
+      return renderer.hitCreatorHub(p.x, p.y) !== null;
+    case "editor":
+      return (
+        renderer.hitEditorName(p.x, p.y) ||
+        renderer.hitEditorHeader(p.x, p.y) !== null ||
+        renderer.hitEditorTool(p.x, p.y, EDITOR_TOOLS.length) !== null ||
+        renderer.hitEditorCell(p.x, p.y) !== null
+      );
+    case "customPlay": {
+      if (p.y > STAGE_H - 36) return true;
+      const saved = listSaved();
+      return p.y >= 148 && p.y < 148 + saved.length * 22 && p.x < 420;
+    }
+    case "editorSave":
+      return renderer.hitSavePrompt(p.x, p.y) !== null;
+    default:
+      return false;
+  }
+}
+
 canvas.addEventListener("pointermove", (e) => {
   const p = pointerPos(e);
   if (screen === "menu") menuHover = renderer.hitMenu(p.x, p.y, MENU_Y, MENU_COUNT);
   else if (screen === "ask") menuHover = renderer.hitAsk(p.x, p.y);
   else menuHover = null;
-  const overUi =
-    screen === "play"
-      ? renderer.hitMenuTab(p.x, p.y, playMode === "editor-test")
-      : screen !== "boot" && screen !== "author" && screen !== "title";
-  canvas.style.cursor = overUi ? "pointer" : "default";
+  canvas.style.cursor = pointerOverHit(p) ? "pointer" : "default";
   if (paintHeld && screen === "editor") {
     const cell = renderer.hitEditorCell(p.x, p.y);
     if (cell && editorTool !== "link" && editorTool !== "spawn") paintCell(cell.x, cell.y);
@@ -1209,17 +1289,16 @@ function pollPad(): void {
 function update(dt: number): void {
   input.update(dt);
   pollPad();
-  logoTick += dt;
-  if (logoTick > 0.1) {
-    logoTick = 0;
-    const roll = Math.random();
-    if (roll < 0.14) logoFrame = 3;
-    else if (roll < 0.24) logoFrame = 4;
-    else if (roll < 0.32) logoFrame = 2;
-    else if (roll < 0.38) logoFrame = 1;
-    else logoFrame = 5;
-    glitchX = Math.random() < 0.1 ? (Math.random() < 0.5 ? -1 : 1) : 0;
-  }
+  const t = now() / 1000;
+  const flicker = (phase: number) => {
+    const wave = 0.78 + 0.22 * Math.sin(t * 2.4 + phase);
+    const buzz = Math.sin(t * 17 + phase * 3) * Math.sin(t * 4.1 + phase);
+    if (buzz > 0.78) return 0.08 + 0.18 * (0.5 + 0.5 * Math.sin(t * 40));
+    return wave;
+  };
+  logoNeonR = flicker(0.2);
+  logoNeonZ = flicker(1.7);
+  glitchX = Math.random() < 0.08 ? (Math.random() < 0.5 ? -1 : 1) : 0;
   spinTick += dt;
   if (spinTick > 0.09) {
     spinTick = 0;
@@ -1284,7 +1363,7 @@ function draw(): void {
   renderer.clear();
   if (screen === "boot") {
     renderer.drawBg("menu");
-    renderer.drawLogo(5, 36, 52);
+    renderer.drawLogo(36, 52);
     renderer.drawUiPrompt("Click or press any key to start", 42, 300);
     return;
   }
@@ -1302,7 +1381,7 @@ function draw(): void {
 
   if (screen === "menu" || screen === "load" || screen === "credits" || screen === "ask") {
     renderer.drawBg("menu");
-    renderer.drawLogo(logoFrame, 32, 48, glitchX);
+    renderer.drawLogo(32, 48, logoNeonR, logoNeonZ, glitchX);
     renderer.drawSpinBlock(spinFrame, 308, 92);
     if (screen === "menu" || screen === "ask") {
       renderer.drawMenuButtons(menuIndex, MENU_Y, menuHover, sound.muted, resumeAt !== null);
@@ -1339,6 +1418,8 @@ function draw(): void {
       EDITOR_TOOLS.find((t) => t.id === editorTool)?.label ?? editorTool,
       EDITOR_TOOLS.map((t) => t.label),
       editorHint,
+      editorName,
+      editorNameFocus,
     );
     return;
   }
