@@ -1,11 +1,14 @@
 import { loadAssets, STAGE_H, STAGE_W } from "./assets";
 import { SoundBank } from "./audio";
 import { LEVELS, Stage, levelByCode, type Dir } from "./engine";
-import { Renderer, fitCamera, formatTime } from "./render";
+import { Renderer, fitCamera, formatTime, MENU_COUNT, MENU_Y } from "./render";
 
 type Screen =
   | "boot"
+  | "publisher"
+  | "author"
   | "menu"
+  | "ask"
   | "load"
   | "credits"
   | "tutorial"
@@ -39,6 +42,10 @@ let sessionFails = 0;
 let sessionStart = 0;
 let pendingResult: "ok" | "fail" | "win" | "split" | null = null;
 let busy = false;
+let splashT = 0;
+let askIndex = 0;
+let spinFrame = 0;
+let spinTick = 0;
 
 function now(): number {
   return performance.now();
@@ -174,14 +181,32 @@ function onKey(e: KeyboardEvent): void {
 
   if (screen === "menu") {
     if (e.key === "ArrowDown") {
-      menuIndex = (menuIndex + 1) % 3;
+      menuIndex = (menuIndex + 1) % MENU_COUNT;
       sound.play("hover");
     } else if (e.key === "ArrowUp") {
-      menuIndex = (menuIndex + 2) % 3;
+      menuIndex = (menuIndex + MENU_COUNT - 1) % MENU_COUNT;
       sound.play("hover");
     } else if (e.key === "Enter" || e.key === " ") {
       chooseMenu(menuIndex);
     }
+    return;
+  }
+
+  if (screen === "ask") {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      askIndex = askIndex === 0 ? 1 : 0;
+      sound.play("hover");
+    } else if (e.key === "Enter" || e.key === " ") {
+      chooseAsk(askIndex);
+    } else if (e.key === "Escape") {
+      screen = "menu";
+      sound.play("click");
+    }
+    return;
+  }
+
+  if (screen === "publisher" || screen === "author") {
+    advanceSplash();
     return;
   }
 
@@ -222,8 +247,7 @@ function onKey(e: KeyboardEvent): void {
     if (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ") tutorialNext();
     else if (e.key === "ArrowLeft" || e.key === "Backspace") tutorialBack();
     else if (e.key === "Escape") {
-      screen = "menu";
-      sound.play("click");
+      tutorialSkip();
     }
     return;
   }
@@ -303,17 +327,37 @@ function tryLoad(): void {
 function chooseMenu(i: number): void {
   sound.play("click");
   if (i === 0) {
-    tutorialSlide = 0;
-    tutorialOffset = 18;
-    screen = "tutorial";
+    askIndex = 0;
+    screen = "ask";
   } else if (i === 1) {
     loadCode = "";
     loadCursor = 0;
     loadInvalid = false;
     screen = "load";
+  } else if (i === 2) {
+    const muted = sound.toggleMute();
+    if (!muted) sound.startMenu();
   } else {
     screen = "credits";
   }
+}
+
+function chooseAsk(i: number): void {
+  sound.play("click");
+  if (i === 0) {
+    tutorialSlide = 0;
+    tutorialOffset = 18;
+    screen = "tutorial";
+  } else {
+    startSession();
+    beginLevel(0, true);
+  }
+}
+
+function tutorialSkip(): void {
+  sound.play("click");
+  startSession();
+  beginLevel(0, true);
 }
 
 function tutorialNext(): void {
@@ -346,6 +390,18 @@ function restartLevel(): void {
 
 function unlock(): void {
   sound.unlock();
+  screen = "publisher";
+  splashT = 0;
+  sound.play("splash", { volume: 0.9 });
+}
+
+function advanceSplash(): void {
+  if (screen === "publisher") {
+    screen = "author";
+    splashT = 0;
+    sound.play("splash", { volume: 0.7 });
+    return;
+  }
   screen = "menu";
   sound.startMenu();
 }
@@ -357,11 +413,23 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "menu") {
-    const hit = renderer.hitMenu(p.x, p.y, 236, 3);
+    const hit = renderer.hitMenu(p.x, p.y, MENU_Y, MENU_COUNT);
     if (hit !== null) {
       menuIndex = hit;
-      chooseMenu(iSafe(hit));
+      chooseMenu(hit);
     }
+    return;
+  }
+  if (screen === "ask") {
+    const hit = renderer.hitAsk(p.x, p.y);
+    if (hit !== null) {
+      askIndex = hit;
+      chooseAsk(hit);
+    }
+    return;
+  }
+  if (screen === "publisher" || screen === "author") {
+    advanceSplash();
     return;
   }
   if (screen === "credits") {
@@ -370,13 +438,19 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "load") {
-    if (p.y > 290 && p.y < 330) tryLoad();
+    if (p.y > STAGE_H - 48 && p.x < 180) {
+      screen = "menu";
+      sound.play("click");
+      return;
+    }
+    if (p.y > 280 && p.y < 330) tryLoad();
     return;
   }
   if (screen === "tutorial") {
     const nav = renderer.hitTutorialNav(p.x, p.y);
     if (nav === "next") tutorialNext();
     if (nav === "back") tutorialBack();
+    if (nav === "skip") tutorialSkip();
     return;
   }
   if (screen === "complete") {
@@ -407,7 +481,9 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   const p = pointerPos(e);
-  if (screen === "menu") menuHover = renderer.hitMenu(p.x, p.y, 236, 3);
+  if (screen === "menu") menuHover = renderer.hitMenu(p.x, p.y, MENU_Y, MENU_COUNT);
+  else if (screen === "ask") menuHover = renderer.hitAsk(p.x, p.y);
+  else menuHover = null;
   canvas.style.cursor = menuHover !== null || screen !== "play" ? "pointer" : "default";
 });
 
@@ -426,10 +502,6 @@ touch.addEventListener("pointerdown", (e) => {
   if (btn.getAttribute("data-act") === "space") stage?.swapSplit();
 });
 
-function iSafe(n: number): number {
-  return n;
-}
-
 let last = now();
 function frame(t: number): void {
   const dt = Math.min(0.05, (t - last) / 1000);
@@ -447,7 +519,28 @@ function update(dt: number): void {
     else logoFrame = Math.min(5, logoFrame + (logoFrame < 5 ? 1 : 0));
     glitchX = Math.random() < 0.12 ? (Math.random() < 0.5 ? -2 : 2) : 0;
   }
+  spinTick += dt;
+  if (spinTick > 0.09) {
+    spinTick = 0;
+    spinFrame = (spinFrame + 1) % 9;
+  }
   tutorialOffset += (0 - tutorialOffset) * Math.min(1, dt * 10);
+
+  if (screen === "publisher") {
+    splashT += dt;
+    if (splashT > 2.6) {
+      screen = "author";
+      splashT = 0;
+      sound.play("splash", { volume: 0.7 });
+    }
+  }
+  if (screen === "author") {
+    splashT += dt;
+    if (splashT > 3.2) {
+      screen = "menu";
+      sound.startMenu();
+    }
+  }
 
   if ((screen === "play" || screen === "pause") && stage) {
     stage.tick(dt);
@@ -492,12 +585,26 @@ function draw(): void {
     return;
   }
 
-  if (screen === "menu" || screen === "load" || screen === "credits") {
+  if (screen === "publisher" || screen === "author") {
+    const fade =
+      splashT < 0.25 ? splashT / 0.25 : splashT > (screen === "publisher" ? 2.3 : 2.9)
+        ? Math.max(0, ((screen === "publisher" ? 2.6 : 3.2) - splashT) / 0.3)
+        : 1;
+    if (screen === "publisher") renderer.drawPublisherSplash(fade);
+    else renderer.drawAuthorCard(fade);
+    return;
+  }
+
+  if (screen === "menu" || screen === "load" || screen === "credits" || screen === "ask") {
     renderer.drawBg("menu");
-    renderer.drawLogo(logoFrame, 162, 88, glitchX);
-    if (screen === "menu") renderer.drawMenuText(["Start New Game", "Load Stage", "Credits"], menuIndex, 236, menuHover);
+    renderer.drawLogo(logoFrame, 162, 72, glitchX);
+    renderer.drawSpinBlock(spinFrame, 318, 138);
+    if (screen === "menu" || screen === "ask") {
+      renderer.drawMenuButtons(menuIndex, MENU_Y, menuHover, sound.muted);
+    }
     if (screen === "load") renderer.drawLoad(loadCode, Math.min(loadCursor, 5), loadInvalid);
     if (screen === "credits") renderer.drawCredits();
+    if (screen === "ask") renderer.drawAskInstructions(askIndex);
     return;
   }
 

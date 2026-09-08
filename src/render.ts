@@ -16,6 +16,17 @@ const SYX = -5;
 const SXY = 10;
 const SY = 17.5;
 const SZ = 23;
+const GROUND = 0.28;
+const TILE_OX = -2;
+const TILE_OY = -6;
+const BG_W = 551;
+const BG_H = 301;
+const HUD_DIGIT_W = 201 / 10;
+const HUD_DIGIT_H = 23;
+const MENU_X = 148;
+export const MENU_Y = 214;
+export const MENU_GAP = 28;
+export const MENU_COUNT = 4;
 
 export function project(x: number, y: number, z: number): { x: number; y: number } {
   return {
@@ -96,10 +107,10 @@ function rotateAround(
 }
 
 export function boxFor(block: BlockState, cube = false): { x: number; y: number; z: number; w: number; d: number; h: number } {
-  if (cube) return { x: block.x, y: block.y, z: 0, w: 1, d: 1, h: 1 };
-  if (block.ori === "up") return { x: block.x, y: block.y, z: 0, w: 1, d: 1, h: 2 };
-  if (block.ori === "forward") return { x: block.x, y: block.y, z: 0, w: 1, d: 2, h: 1 };
-  return { x: block.x, y: block.y, z: 0, w: 2, d: 1, h: 1 };
+  if (cube) return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 1 };
+  if (block.ori === "up") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 2 };
+  if (block.ori === "forward") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 2, h: 1 };
+  return { x: block.x, y: block.y, z: GROUND, w: 2, d: 1, h: 1 };
 }
 
 function rollSpec(from: BlockState, dir: Dir, cube: boolean): {
@@ -109,15 +120,15 @@ function rollSpec(from: BlockState, dir: Dir, cube: boolean): {
 } {
   const b = boxFor(from, cube);
   if (dir === "right") {
-    return { origin: [b.x + b.w, b.y, 0], axis: [0, 1, 0], angle: -Math.PI / 2 };
+    return { origin: [b.x + b.w, b.y, GROUND], axis: [0, 1, 0], angle: -Math.PI / 2 };
   }
   if (dir === "left") {
-    return { origin: [b.x, b.y, 0], axis: [0, 1, 0], angle: Math.PI / 2 };
+    return { origin: [b.x, b.y, GROUND], axis: [0, 1, 0], angle: Math.PI / 2 };
   }
   if (dir === "down") {
-    return { origin: [b.x, b.y + b.d, 0], axis: [1, 0, 0], angle: Math.PI / 2 };
+    return { origin: [b.x, b.y + b.d, GROUND], axis: [1, 0, 0], angle: Math.PI / 2 };
   }
-  return { origin: [b.x, b.y, 0], axis: [1, 0, 0], angle: -Math.PI / 2 };
+  return { origin: [b.x, b.y, GROUND], axis: [1, 0, 0], angle: -Math.PI / 2 };
 }
 
 function boxCorners(
@@ -207,48 +218,33 @@ export class Renderer {
   }
 
   drawLevel(stage: Stage): void {
-    const items: { depth: number; draw: () => void }[] = [];
     for (let y = 0; y < H; y++) {
       for (let x = W - 1; x >= 0; x--) {
         const tile = stage.tileAt(x, y);
         const p = project(x, y, 0);
-        const depth = y * 20 - x;
         if (tile === "bridgeL" || tile === "bridgeR") {
           const b = stage.bridgeAt(x, y)!;
           const vis = b.frame / 7;
           if (vis <= 0.02) continue;
-          items.push({
-            depth,
-            draw: () => {
-              this.ctx.save();
-              this.ctx.globalAlpha = Math.min(1, vis);
-              const rise = (1 - vis) * 10;
-              this.ctx.drawImage(this.assets.tiles.stone, this.cam.x + p.x - 2, this.cam.y + p.y - 6 + rise);
-              if (b.flash > 0) {
-                this.ctx.globalAlpha = Math.min(0.7, b.flash * 2);
-                this.ctx.fillStyle = b.flashOn ? "rgba(70,255,90,0.7)" : "rgba(255,50,40,0.7)";
-                this.drawTileOverlay(x, y);
-              }
-              this.ctx.restore();
-            },
-          });
+          this.ctx.save();
+          this.ctx.globalAlpha = Math.min(1, vis);
+          const rise = (1 - vis) * 10;
+          this.ctx.drawImage(this.assets.tiles.stone, this.cam.x + p.x + TILE_OX, this.cam.y + p.y + TILE_OY + rise);
+          if (b.flash > 0) {
+            this.ctx.globalAlpha = Math.min(0.7, b.flash * 2);
+            this.ctx.fillStyle = b.flashOn ? "rgba(70,255,90,0.7)" : "rgba(255,50,40,0.7)";
+            this.drawTileOverlay(x, y);
+          }
+          this.ctx.restore();
           continue;
         }
         const img = tileImage(this.assets, tile);
         if (!img) continue;
-        items.push({
-          depth,
-          draw: () => {
-            this.ctx.drawImage(img, this.cam.x + p.x - 2, this.cam.y + p.y - 6);
-          },
-        });
+        this.ctx.drawImage(img, this.cam.x + p.x + TILE_OX, this.cam.y + p.y + TILE_OY);
       }
     }
 
-    const blockDraws = this.blockDrawables(stage);
-    items.push(...blockDraws);
-    items.sort((a, b) => a.depth - b.depth);
-    for (const it of items) it.draw();
+    for (const it of this.blockDrawables(stage)) it.draw();
   }
 
   private drawTileOverlay(x: number, y: number): void {
@@ -397,19 +393,34 @@ export class Renderer {
 
   drawHud(code: string, moves: number): void {
     const ctx = this.ctx;
+    const sy = STAGE_H / BG_H;
+    const sx = STAGE_W / BG_W;
+    const dh = 11 * sy;
+    const dw = HUD_DIGIT_W * (dh / HUD_DIGIT_H);
+    const x = 476 * sx;
+    this.drawSpriteDigits(this.assets.ui.hudDigits, code, x, 8 * sy, dw, dh);
+    this.drawSpriteDigits(this.assets.ui.hudDigits, String(moves), x, 22.5 * sy, dw, dh);
     ctx.save();
-    ctx.font = "12px Courier New, monospace";
-    ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillText(`CODE  ${code}`, STAGE_W - 11, 18);
-    ctx.fillText(`MOVES ${String(moves).padStart(6, " ")}`, STAGE_W - 11, 34);
-    ctx.fillStyle = "#1a120c";
-    ctx.fillText(`CODE  ${code}`, STAGE_W - 12, 17);
-    ctx.fillText(`MOVES ${String(moves).padStart(6, " ")}`, STAGE_W - 12, 33);
     ctx.font = "11px Trebuchet MS, sans-serif";
+    ctx.textAlign = "right";
     ctx.fillStyle = "rgba(255,200,140,0.7)";
     ctx.fillText("menu", STAGE_W - 12, STAGE_H - 12);
     ctx.restore();
+  }
+
+  private drawSpriteDigits(
+    sheet: HTMLImageElement,
+    text: string,
+    x: number,
+    y: number,
+    dw = HUD_DIGIT_W,
+    dh = HUD_DIGIT_H,
+  ): void {
+    for (let i = 0; i < text.length; i++) {
+      const n = text.charCodeAt(i) - 48;
+      if (n < 0 || n > 9) continue;
+      this.ctx.drawImage(sheet, n * HUD_DIGIT_W, 0, HUD_DIGIT_W, HUD_DIGIT_H, x + i * dw, y, dw, dh);
+    }
   }
 
   drawDigit(digit: number, x: number, y: number, scale = 1): void {
@@ -439,31 +450,106 @@ export class Renderer {
     this.ctx.drawImage(img, x + glitch, y);
   }
 
-  drawMenuText(
-    items: string[],
+  drawMenuButtons(
     selected: number,
     originY: number,
     hover: number | null,
+    muted: boolean,
   ): void {
+    const labels = [
+      this.assets.ui.startNew,
+      this.assets.ui.loadStage,
+      this.assets.ui.toggleSound,
+      this.assets.ui.credits,
+    ];
+    labels.forEach((img, i) => {
+      const y = originY + i * MENU_GAP;
+      const active = i === selected || i === hover;
+      this.ctx.save();
+      this.ctx.globalAlpha = active ? 1 : 0.78;
+      if (active) {
+        this.ctx.fillStyle = "#fff4d6";
+        this.ctx.font = "16px Trebuchet MS, Verdana, sans-serif";
+        this.ctx.fillText(">", MENU_X - 18, y + 16);
+      }
+      this.ctx.drawImage(img, MENU_X, y);
+      if (i === 2) {
+        this.ctx.font = "11px Trebuchet MS, sans-serif";
+        this.ctx.fillStyle = "#c8b090";
+        this.ctx.fillText(muted ? "Off" : "On", MENU_X + img.width + 10, y + 16);
+      }
+      this.ctx.restore();
+    });
+  }
+
+  drawSpinBlock(frame: number, x: number, y: number): void {
+    const frames = this.assets.block.spin;
+    const img = frames[Math.max(0, Math.min(frames.length - 1, frame))];
+    const scale = 0.72;
+    this.ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+  }
+
+  drawAskInstructions(selected: number): void {
     const ctx = this.ctx;
     ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, STAGE_W, STAGE_H);
+    ctx.fillStyle = "rgba(8,4,2,0.88)";
+    ctx.fillRect(90, 140, 370, 130);
+    ctx.strokeStyle = "rgba(255,180,100,0.4)";
+    ctx.strokeRect(90.5, 140.5, 370, 130);
+    ctx.fillStyle = "#fff4d6";
     ctx.font = "16px Trebuchet MS, Verdana, sans-serif";
-    ctx.textAlign = "left";
-    items.forEach((label, i) => {
-      const y = originY + i * 28;
-      const active = i === selected || i === hover;
-      ctx.fillStyle = active ? "#fff4d6" : "#d8c8b0";
-      if (active) ctx.fillText(">", 148, y);
-      ctx.fillText(label, 168, y);
+    ctx.textAlign = "center";
+    ctx.fillText("Would you like to view the instructions?", STAGE_W / 2, 178);
+    const opts = ["Yes", "No"];
+    opts.forEach((label, i) => {
+      const y = 214 + i * 26;
+      ctx.fillStyle = i === selected ? "#fff4d6" : "#c8b8a0";
+      ctx.textAlign = "left";
+      ctx.fillText(i === selected ? `> ${label}` : `  ${label}`, 210, y);
     });
+    ctx.restore();
+  }
+
+  drawPublisherSplash(alpha: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, STAGE_W, STAGE_H);
+    ctx.globalAlpha = alpha;
+    const presented = this.assets.splash.presented;
+    const logo = this.assets.splash.addicting;
+    const tag = this.assets.splash.tagline;
+    ctx.drawImage(presented, (STAGE_W - presented.width) / 2, 88);
+    ctx.drawImage(logo, (STAGE_W - logo.width) / 2, 158);
+    ctx.drawImage(tag, (STAGE_W - tag.width) / 2, 248);
+    ctx.restore();
+  }
+
+  drawAuthorCard(alpha: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, STAGE_W, STAGE_H);
+    ctx.globalAlpha = alpha;
+    const card = this.assets.splash.author;
+    ctx.drawImage(card, (STAGE_W - card.width) / 2, (STAGE_H - card.height) / 2 - 10);
     ctx.restore();
   }
 
   hitMenu(mx: number, my: number, originY: number, count: number): number | null {
     for (let i = 0; i < count; i++) {
-      const y = originY + i * 28;
-      if (mx >= 148 && mx <= 360 && my >= y - 18 && my <= y + 8) return i;
+      const y = originY + i * MENU_GAP;
+      if (mx >= MENU_X - 20 && mx <= MENU_X + 180 && my >= y && my <= y + 24) return i;
     }
+    return null;
+  }
+
+  hitAsk(mx: number, my: number): number | null {
+    if (mx < 200 || mx > 340) return null;
+    if (my >= 196 && my < 220) return 0;
+    if (my >= 220 && my < 246) return 1;
     return null;
   }
 
@@ -491,26 +577,34 @@ export class Renderer {
   drawLoad(code: string, cursor: number, invalid: boolean): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.font = "16px Trebuchet MS, sans-serif";
-    ctx.fillStyle = "#e8dcc8";
-    ctx.textAlign = "center";
-    ctx.fillText("Enter stage passcode", STAGE_W / 2, 210);
-    ctx.font = "28px Courier New, monospace";
+    const label = this.assets.ui.typePasscode;
+    ctx.drawImage(label, (STAGE_W - label.width) / 2, 198);
+    const dw = 18;
+    const dh = 20;
+    const startX = STAGE_W / 2 - (6 * dw) / 2;
     const digits = code.padEnd(6, " ").split("");
     digits.forEach((ch, i) => {
-      const x = STAGE_W / 2 - 90 + i * 32;
-      ctx.fillStyle = "#fff4d6";
-      ctx.fillText(ch === " " ? "_" : ch, x, 258);
+      const x = startX + i * dw;
+      if (ch !== " ") this.drawSpriteDigits(this.assets.ui.loadDigits, ch, x, 228, dw, dh);
+      else {
+        ctx.fillStyle = "#fff4d6";
+        ctx.font = "22px Courier New, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("_", x + dw / 2, 248);
+      }
       if (i === cursor) {
         ctx.fillStyle = "#ffb060";
-        ctx.fillText("^", x, 278);
+        ctx.font = "14px Trebuchet MS, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("^", x + dw / 2, 270);
       }
     });
-    ctx.font = "14px Trebuchet MS, sans-serif";
-    ctx.fillStyle = "#ffc37a";
-    ctx.fillText("Enter  ·  Esc to cancel", STAGE_W / 2, 310);
+    ctx.drawImage(this.assets.ui.enter, STAGE_W / 2 - 40, 286);
+    ctx.drawImage(this.assets.ui.backMenu, 24, STAGE_H - 36);
     if (invalid) {
       ctx.fillStyle = "#ff6a55";
+      ctx.font = "14px Trebuchet MS, sans-serif";
+      ctx.textAlign = "center";
       ctx.fillText("INVALID CODE", STAGE_W / 2, 338);
     }
     ctx.restore();
@@ -521,28 +615,22 @@ export class Renderer {
     ctx.save();
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
+    const text = this.assets.tutorialText[slide];
     const art = this.assets.tutorial[slide];
+    ctx.drawImage(text, 8, 8 + offsetY, 360, 168);
     ctx.drawImage(art, 360, 18 + offsetY, 175, 171);
-    ctx.fillStyle = "#e8dcc8";
-    ctx.font = "13px Trebuchet MS, sans-serif";
-    ctx.textAlign = "left";
-    const lines = TUTORIAL[slide];
-    lines.forEach((line, i) => {
-      ctx.fillStyle = i === 0 ? "#ffb060" : "#e8dcc8";
-      ctx.fillText(line, 24, 36 + offsetY + i * 18);
-    });
-    ctx.fillStyle = "#c0a070";
-    ctx.font = "12px Trebuchet MS, sans-serif";
-    ctx.fillText(slide > 0 ? "< back" : "menu", 24, STAGE_H - 18);
-    ctx.textAlign = "right";
-    ctx.fillText(slide < 8 ? "next >" : "start >", STAGE_W - 24, STAGE_H - 18);
+    ctx.drawImage(this.assets.ui.prev, 24, STAGE_H - 40);
+    if (slide < 8) ctx.drawImage(this.assets.ui.next, STAGE_W - 150, STAGE_H - 40);
+    else ctx.drawImage(this.assets.ui.start, STAGE_W - 150, STAGE_H - 40);
+    ctx.drawImage(this.assets.ui.skip, STAGE_W - 190, 8);
     ctx.restore();
   }
 
-  hitTutorialNav(mx: number, my: number): "back" | "next" | null {
-    if (my < STAGE_H - 36) return null;
-    if (mx < 90) return "back";
-    if (mx > STAGE_W - 90) return "next";
+  hitTutorialNav(mx: number, my: number): "back" | "next" | "skip" | null {
+    if (my < 40 && mx > STAGE_W - 200) return "skip";
+    if (my < STAGE_H - 48) return null;
+    if (mx < 160) return "back";
+    if (mx > STAGE_W - 170) return "next";
     return null;
   }
 
@@ -555,23 +643,23 @@ export class Renderer {
     ctx.fillRect(80, 110, 390, 180);
     ctx.strokeStyle = "rgba(255,180,100,0.35)";
     ctx.strokeRect(80.5, 110.5, 390, 180);
-    ctx.font = "16px Trebuchet MS, sans-serif";
-    const opts = ["Return to Game", "Quit to Menu"];
-    opts.forEach((label, i) => {
-      ctx.fillStyle = i === selected ? "#fff4d6" : "#c8b8a0";
-      ctx.textAlign = "left";
-      ctx.fillText(i === selected ? `> ${label}` : `  ${label}`, 100, 160 + i * 28);
+    const opts = [this.assets.ui.returnGame, this.assets.ui.quitMenu];
+    opts.forEach((img, i) => {
+      const y = 148 + i * 32;
+      if (i === selected) {
+        ctx.fillStyle = "#fff4d6";
+        ctx.font = "16px Trebuchet MS, sans-serif";
+        ctx.fillText(">", 96, y + 16);
+      }
+      ctx.drawImage(img, 118, y);
     });
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#d8c8b0";
+    ctx.drawImage(this.assets.ui.pauseStats, 310, 148);
+    ctx.fillStyle = "#fff4d6";
     ctx.font = "13px Trebuchet MS, sans-serif";
-    ctx.fillText("Time", 310, 160);
-    ctx.fillText("Stage", 310, 182);
-    ctx.fillText("Attempts", 310, 204);
     ctx.textAlign = "right";
-    ctx.fillText(time, 450, 160);
-    ctx.fillText(String(stage + 1).padStart(2, "0"), 450, 182);
-    ctx.fillText(String(attempts), 450, 204);
+    ctx.fillText(time, 450, 166);
+    ctx.fillText(String(stage + 1).padStart(2, "0"), 450, 188);
+    ctx.fillText(String(attempts), 450, 210);
     ctx.restore();
   }
 
