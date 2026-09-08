@@ -1774,9 +1774,7 @@ function draw(): void {
   };
 
   if (screen === "boot") {
-    renderer.drawBg("menu");
-    drawMark(28, 110);
-    renderer.drawUiPrompt("Click or press any key to start", 42, 300);
+    renderer.drawUiPrompt("Click or press any key to start", STAGE_W / 2, 210, "center");
     return;
   }
 
@@ -1792,8 +1790,6 @@ function draw(): void {
   }
 
   if (screen === "nameEntry") {
-    renderer.drawBg("menu");
-    drawMark(28, 110);
     renderer.drawNameEntry(nameDraft, brandName(nameDraft));
     return;
   }

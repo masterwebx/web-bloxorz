@@ -1002,8 +1002,8 @@ export class Renderer {
     return null;
   }
 
-  drawUiPrompt(text: string, x: number, y: number): void {
-    this.drawUiText(text, x, y, { size: 14, glow: true, color: "#ffc37a" });
+  drawUiPrompt(text: string, x: number, y: number, align: CanvasTextAlign = "left"): void {
+    this.drawUiText(text, x, y, { size: 14, glow: true, color: "#fff8e8", align });
   }
 
   drawCredits(): void {
@@ -1269,11 +1269,39 @@ export class Renderer {
   }
 
   drawNameEntry(name: string, brand: string): void {
-    this.drawUiText("What should we call you?", 42, 150, { size: 18 });
-    this.drawUiText("This name is saved on stages you create.", 42, 178, { size: 13, weight: "500" });
-    this.drawUiText(`${name}_`, 42, 230, { size: 22 });
-    this.drawUiText(`The game will be ${brand}`, 42, 270, { size: 14, weight: "500" });
-    this.drawUiText("Type your name, then press Enter", 42, 360, { size: 13, weight: "500" });
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, STAGE_W, STAGE_H);
+    ctx.restore();
+    const light = "#fff8e8";
+    this.drawUiText("What should we call you?", STAGE_W / 2, 130, {
+      size: 20,
+      align: "center",
+      color: light,
+    });
+    this.drawUiText("This name is saved on stages you create.", STAGE_W / 2, 168, {
+      size: 13,
+      align: "center",
+      weight: "500",
+      color: light,
+    });
+    this.drawUiText(name ? `${name}_` : "_", STAGE_W / 2, 230, {
+      size: 26,
+      align: "center",
+      color: light,
+    });
+    this.drawUiText(`The game will be ${brand}`, STAGE_W / 2, 280, {
+      size: 16,
+      align: "center",
+      color: light,
+    });
+    this.drawUiText("Type your name, then press Enter", STAGE_W / 2, 360, {
+      size: 13,
+      align: "center",
+      weight: "500",
+      color: light,
+    });
   }
 
   drawStageList(
