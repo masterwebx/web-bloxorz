@@ -1,6 +1,12 @@
 export const STAGE_W = 550;
 export const STAGE_H = 400;
 
+export function assetUrl(path: string): string {
+  const base = import.meta.env.BASE_URL;
+  const prefix = base.endsWith("/") ? base : `${base}/`;
+  return `${prefix}${path.replace(/^\//, "")}`;
+}
+
 export interface Assets {
   tiles: {
     stone: HTMLImageElement;
@@ -59,26 +65,26 @@ export async function loadAssets(): Promise<Assets> {
     cube,
     ...rest
   ] = await Promise.all([
-    loadImage("/assets/tiles/267.png"),
-    loadImage("/assets/tiles/298.png"),
-    loadImage("/assets/tiles/293.png"),
-    loadImage("/assets/tiles/295.png"),
-    loadImage("/assets/tiles/318.png"),
-    loadImage("/assets/tiles/316.png"),
-    loadImage("/assets/ui/45.png"),
-    loadImage("/assets/ui/336.png"),
-    loadImage("/assets/ui/325.png"),
-    loadImage("/assets/ui/329.png"),
-    loadImage("/assets/ui/186.png"),
-    loadImage("/assets/ui/268.png"),
-    loadImage("/assets/ui/708.png"),
-    loadImage("/assets/block/833.png"),
-    loadImage("/assets/block/851.png"),
-    loadImage("/assets/block/871.png"),
-    loadImage("/assets/block/706.png"),
-    ...[43, 48, 50, 52, 54, 56].map((id) => loadImage(`/assets/ui/${id}.png`)),
+    loadImage(assetUrl("assets/tiles/267.png")),
+    loadImage(assetUrl("assets/tiles/298.png")),
+    loadImage(assetUrl("assets/tiles/293.png")),
+    loadImage(assetUrl("assets/tiles/295.png")),
+    loadImage(assetUrl("assets/tiles/318.png")),
+    loadImage(assetUrl("assets/tiles/316.png")),
+    loadImage(assetUrl("assets/ui/45.png")),
+    loadImage(assetUrl("assets/ui/336.png")),
+    loadImage(assetUrl("assets/ui/325.png")),
+    loadImage(assetUrl("assets/ui/329.png")),
+    loadImage(assetUrl("assets/ui/186.png")),
+    loadImage(assetUrl("assets/ui/268.png")),
+    loadImage(assetUrl("assets/ui/708.png")),
+    loadImage(assetUrl("assets/block/833.png")),
+    loadImage(assetUrl("assets/block/851.png")),
+    loadImage(assetUrl("assets/block/871.png")),
+    loadImage(assetUrl("assets/block/706.png")),
+    ...[43, 48, 50, 52, 54, 56].map((id) => loadImage(assetUrl(`assets/ui/${id}.png`))),
     ...[199, 216, 226, 231, 236, 241, 246, 251, 256].map((id) =>
-      loadImage(`/assets/tutorial/${id}.png`),
+      loadImage(assetUrl(`assets/tutorial/${id}.png`)),
     ),
   ]);
 

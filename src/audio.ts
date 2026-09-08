@@ -1,3 +1,5 @@
+import { assetUrl } from "./assets";
+
 export class SoundBank {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
@@ -25,7 +27,7 @@ export class SoundBank {
     const ctx = this.getCtx();
     await Promise.all(
       names.map(async (name) => {
-        const res = await fetch(`/assets/audio/${name}.wav`);
+        const res = await fetch(assetUrl(`assets/audio/${name}.wav`));
         const buf = await res.arrayBuffer();
         this.buffers.set(name, await ctx.decodeAudioData(buf.slice(0)));
       }),
