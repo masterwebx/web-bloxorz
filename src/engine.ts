@@ -228,7 +228,7 @@ export class Stage {
     const from = { ...this.block };
     const to = rolled(from, dir);
     this.moves++;
-    this.anim = { kind: "roll", t: 0, dur: 0.18, dir, from, to };
+    this.anim = { kind: "roll", t: 0, dur: 0.22, dir, from, to };
     return true;
   }
 

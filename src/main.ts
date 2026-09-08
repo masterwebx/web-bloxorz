@@ -76,6 +76,7 @@ function enterPlay(): void {
   stage.dropIn();
   busy = true;
   pendingResult = null;
+  canvas.focus();
   sound.startAmbient();
   sound.play("drop_in", { volume: 0.8 });
 }
@@ -449,16 +450,20 @@ function update(dt: number): void {
     stage.tick(dt);
     if (busy && stage.anim && stage.anim.t >= stage.anim.dur) {
       const kind = stage.anim.kind;
-      stage.anim = null;
-      if (kind === "roll") handlePlayResult();
-      else if (kind === "drop" || kind === "splitdrop") {
+      if (kind === "roll") {
+        handlePlayResult();
+        if (stage.anim?.kind === "roll") stage.anim = null;
+      } else if (kind === "drop" || kind === "splitdrop") {
+        stage.anim = null;
         busy = false;
         if (kind === "splitdrop") sound.play("whoosh_2");
       } else if (kind === "fall" && pendingResult === "fail") {
+        stage.anim = null;
         stage = new Stage(LEVELS[levelIndex]);
         renderer.cam = fitCamera(stage);
         enterPlay();
       } else if (kind === "sink" && pendingResult === "win") {
+        stage.anim = null;
         beginLevel(levelIndex + 1, true);
       }
     }
@@ -526,6 +531,8 @@ function draw(): void {
 async function boot(): Promise<void> {
   const assets = await loadAssets();
   renderer = new Renderer(canvas, assets);
+  canvas.tabIndex = 0;
+  canvas.setAttribute("aria-label", "Bloxorz");
   await sound.load();
   requestAnimationFrame(frame);
 }

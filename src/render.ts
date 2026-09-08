@@ -370,9 +370,7 @@ export class Renderer {
       const cross = ax * by - ay * bx;
       const depth = (pts[0].d + pts[1].d + pts[2].d + pts[3].d) / 4;
       return { pts, cross, depth, fi };
-    })
-      .filter((f) => f.cross < 0)
-      .sort((a, b) => a.depth - b.depth);
+    }).sort((a, b) => a.depth - b.depth);
 
     ctx.save();
     ctx.globalAlpha = alpha;
