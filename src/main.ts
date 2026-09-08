@@ -1364,6 +1364,7 @@ function draw(): void {
   if (screen === "boot") {
     renderer.drawBg("menu");
     renderer.drawLogo(36, 52);
+    renderer.drawSpinBlock(spinFrame, 248, 18);
     renderer.drawUiPrompt("Click or press any key to start", 42, 300);
     return;
   }
@@ -1381,8 +1382,8 @@ function draw(): void {
 
   if (screen === "menu" || screen === "load" || screen === "credits" || screen === "ask") {
     renderer.drawBg("menu");
-    renderer.drawLogo(32, 48, logoNeonR, logoNeonZ, glitchX);
-    renderer.drawSpinBlock(spinFrame, 308, 92);
+    renderer.drawLogo(28, 36, logoNeonR, logoNeonZ, glitchX);
+    renderer.drawSpinBlock(spinFrame, 248, 8);
     if (screen === "menu" || screen === "ask") {
       renderer.drawMenuButtons(menuIndex, MENU_Y, menuHover, sound.muted, resumeAt !== null);
     }

@@ -26,6 +26,9 @@ export const PAUSE_COUNT = 4;
 const SETTINGS_Y = 152;
 const SETTINGS_GAP = 17;
 const UI_FONT = "Orbitron, sans-serif";
+/** Shared SWF registration for every 201×151 block frame. */
+const SPRITE_OX = -77;
+const SPRITE_OY = -94;
 
 export function project(x: number, y: number, z: number): { x: number; y: number } {
   return {
@@ -279,13 +282,13 @@ export class Renderer {
         anim.kind === "splitdrop");
     if (!moving) {
       this.drawBlockShadow(state, cube, 0.42);
-      this.drawBlockSprite(state, cube);
+      this.blitBlock(this.idleImage(state, cube), state.x, state.y);
       return;
     }
     if (anim?.kind === "drop") {
       const t = ease(anim.t / anim.dur);
       this.drawBlockShadow(anim.to, cube, 0.15 + t * 0.3);
-      this.drawBlockSprite(anim.to, cube, (1 - t) * 155);
+      this.blitBlock(this.idleImage(anim.to, cube), anim.to.x, anim.to.y, (1 - t) * 155);
       return;
     }
     if (anim?.kind === "splitdrop") {
@@ -294,28 +297,34 @@ export class Renderer {
         ? { x: anim.from.x, y: anim.from.y, ori: "up" }
         : { x: anim.to2!.x, y: anim.to2!.y, ori: "up" };
       this.drawBlockShadow(st, true, 0.15 + t * 0.3);
-      this.drawBlockSprite(st, true, (1 - t) * 130);
+      this.blitBlock(this.assets.block.cube, st.x, st.y, (1 - t) * 130);
       return;
     }
     if (anim?.kind === "roll" && anim.dir) {
+      const u = anim.t / anim.dur;
+      const t = ease(u);
+      const fi = Math.min(7, Math.floor(u * 8));
       const from = anim.from;
-      const fi = Math.min(7, Math.floor((anim.t / anim.dur) * 8));
+      const to = anim.to;
       const pack = cube ? this.assets.block.rolls.cube : this.assets.block.rolls[from.ori];
-      this.drawBlockShadow(from, cube, 0.38);
-      this.drawBlockSprite(from, cube, 0, 1, pack[anim.dir][fi]);
+      const x = from.x + (to.x - from.x) * t;
+      const y = from.y + (to.y - from.y) * t;
+      const shadow = t < 0.55 ? from : to;
+      this.drawBlockShadow(shadow, cube, 0.38);
+      this.blitBlock(pack[anim.dir][fi], x, y);
       return;
     }
     if (anim?.kind === "sink") {
       const t = ease(anim.t / anim.dur);
       const fi = Math.min(7, Math.floor((anim.t / anim.dur) * 8));
       this.drawBlockShadow(anim.from, cube, 0.22 * (1 - t));
-      this.drawBlockSprite(anim.from, cube, 0, 1, this.assets.block.sink[fi]);
+      this.blitBlock(this.assets.block.sink[fi], anim.from.x, anim.from.y);
       return;
     }
     if (anim?.kind === "fall") {
       const t = anim.t / anim.dur;
       this.drawBlockShadow(anim.from, cube, 0.15 * (1 - t));
-      this.drawBlockSprite(anim.from, cube, -t * t * 210, 1 - t * 0.85);
+      this.blitBlock(this.idleImage(anim.from, cube), anim.from.x, anim.from.y, -t * t * 210, 1 - t * 0.85);
     }
   }
 
@@ -343,32 +352,18 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawBlockSprite(
-    state: BlockState,
-    cube: boolean,
-    lift = 0,
-    alpha = 1,
-    img?: HTMLImageElement,
-  ): void {
-    const sprite = img ?? (cube
-      ? this.assets.block.cube
-      : state.ori === "up"
-        ? this.assets.block.up
-        : state.ori === "forward"
-          ? this.assets.block.forward
-          : this.assets.block.right);
-    const p = project(state.x, state.y, 0);
-    const foot =
-      cube || state.ori === "up"
-        ? { ax: 93, ay: 114, sx: 16, sy: 20 }
-        : state.ori === "forward"
-          ? { ax: 82, ay: 98, sx: 26, sy: 38 }
-          : { ax: 124, ay: 109, sx: 16, sy: 21 };
-    const x = this.cam.x + p.x + foot.sx - foot.ax;
-    const y = this.cam.y + p.y + foot.sy - foot.ay - lift;
+  private idleImage(state: BlockState, cube: boolean): HTMLImageElement {
+    if (cube) return this.assets.block.cube;
+    if (state.ori === "up") return this.assets.block.up;
+    if (state.ori === "forward") return this.assets.block.forward;
+    return this.assets.block.right;
+  }
+
+  private blitBlock(img: HTMLImageElement, x: number, y: number, lift = 0, alpha = 1): void {
+    const p = project(x, y, 0);
     this.ctx.save();
     this.ctx.globalAlpha = alpha;
-    this.ctx.drawImage(this.knocked(sprite), x, y);
+    this.ctx.drawImage(this.knocked(img), this.cam.x + p.x + SPRITE_OX, this.cam.y + p.y + SPRITE_OY - lift);
     this.ctx.restore();
   }
 
@@ -390,19 +385,34 @@ export class Renderer {
     ctx.font = `${opts.weight ?? "700"} ${size}px ${UI_FONT}`;
     ctx.textAlign = opts.align ?? "left";
     ctx.textBaseline = "alphabetic";
-    ctx.shadowColor = "rgba(0, 0, 0, 0.82)";
-    ctx.shadowOffsetX = 2;
-    ctx.shadowOffsetY = 2;
+    ctx.shadowColor = "transparent";
     ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    const tx = Math.round(x);
+    const ty = Math.round(y);
+    if (opts.glow) {
+      const w = ctx.measureText(text).width;
+      const cx = opts.align === "center" ? tx : opts.align === "right" ? tx - w / 2 : tx + w / 2;
+      const g = ctx.createRadialGradient(cx, ty - size * 0.35, 2, cx, ty - size * 0.35, Math.max(22, w * 0.42));
+      g.addColorStop(0, "rgba(255, 110, 28, 0.22)");
+      g.addColorStop(1, "rgba(255, 80, 10, 0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(cx, ty - size * 0.32, Math.max(18, w * 0.48), size * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "rgba(0, 0, 0, 0.78)";
+    ctx.fillText(text, tx + 1, ty + 1);
     ctx.fillStyle = opts.color ?? "#fff8e8";
-    ctx.fillText(text, x, y);
+    ctx.fillText(text, tx, ty);
     ctx.restore();
   }
 
   drawHud(code: string, moves: number, tab = "Menu"): void {
     this.drawMenuTab(tab);
-    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 12, align: "right", weight: "500" });
-    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 12, align: "right", weight: "500" });
+    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", weight: "500" });
+    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", weight: "500" });
   }
 
   drawMenuTab(label = "Menu"): void {
@@ -430,8 +440,8 @@ export class Renderer {
 
   drawLogo(x: number, y: number, neonR = 1, neonZ = 1, glitch = 0): void {
     const ctx = this.ctx;
-    const pitch = 5.4;
-    const radius = 2.05;
+    const pitch = 5.5;
+    const radius = 2.25;
     const letters = "BLOXORZ";
     ctx.save();
     ctx.translate(x + glitch, y);
@@ -442,17 +452,17 @@ export class Renderer {
       for (let row = 0; row < 7; row++) {
         for (let col = 0; col < 5; col++) {
           if (glyph[row][col] !== "1") continue;
-          const bx = ox + col * pitch + 2.2;
-          const by = row * pitch + 2.2;
-          const g = ctx.createRadialGradient(bx, by, 0, bx, by, 5.2);
-          g.addColorStop(0, `rgba(255, 236, 190, ${0.95 * on})`);
-          g.addColorStop(0.38, `rgba(255, 168, 64, ${0.72 * on})`);
-          g.addColorStop(1, "rgba(255, 110, 16, 0)");
+          const bx = ox + col * pitch + 2.4;
+          const by = row * pitch + 2.4;
+          const g = ctx.createRadialGradient(bx, by, 0, bx, by, 8.2);
+          g.addColorStop(0, `rgba(255, 230, 170, ${0.95 * on})`);
+          g.addColorStop(0.28, `rgba(255, 150, 40, ${0.8 * on})`);
+          g.addColorStop(1, "rgba(255, 90, 0, 0)");
           ctx.fillStyle = g;
           ctx.beginPath();
-          ctx.arc(bx, by, 5.2, 0, Math.PI * 2);
+          ctx.arc(bx, by, 8.2, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = `rgba(255, 248, 230, ${0.35 + 0.65 * on})`;
+          ctx.fillStyle = `rgba(255, 248, 228, ${0.4 + 0.6 * on})`;
           ctx.beginPath();
           ctx.arc(bx, by, radius, 0, Math.PI * 2);
           ctx.fill();
@@ -493,20 +503,18 @@ export class Renderer {
   drawSpinBlock(frame: number, x: number, y: number): void {
     const frames = this.assets.block.spin;
     const img = frames[Math.max(0, Math.min(frames.length - 1, frame))];
-    const scale = 0.92;
+    const scale = 0.86;
     this.ctx.save();
-    const gx = x + 48;
-    const gy = y + 72;
-    const glow = this.ctx.createRadialGradient(gx, gy, 8, gx, gy, 110);
-    glow.addColorStop(0, "rgba(255, 110, 30, 0.55)");
-    glow.addColorStop(0.45, "rgba(180, 50, 10, 0.22)");
+    const gx = x + img.width * scale * 0.48;
+    const gy = y + img.height * scale * 0.55;
+    const glow = this.ctx.createRadialGradient(gx, gy, 6, gx, gy, 78);
+    glow.addColorStop(0, "rgba(255, 120, 30, 0.4)");
+    glow.addColorStop(0.5, "rgba(180, 50, 10, 0.16)");
     glow.addColorStop(1, "rgba(0, 0, 0, 0)");
     this.ctx.fillStyle = glow;
     this.ctx.beginPath();
-    this.ctx.arc(gx, gy, 110, 0, Math.PI * 2);
+    this.ctx.arc(gx, gy, 78, 0, Math.PI * 2);
     this.ctx.fill();
-    this.ctx.shadowColor = "#c05018";
-    this.ctx.shadowBlur = 26;
     this.ctx.drawImage(this.knocked(img), x, y, img.width * scale, img.height * scale);
     this.ctx.restore();
   }
@@ -568,7 +576,6 @@ export class Renderer {
     lines.forEach((line, i) => {
       this.drawUiText(line, STAGE_W / 2, 178 + i * 28, {
         size: 14,
-        glow: true,
         align: "center",
         weight: "500",
       });
@@ -641,7 +648,6 @@ export class Renderer {
     lines.forEach((line, i) => {
       this.drawUiText(line, 22, 36 + offsetY + i * 20, {
         size: i === 0 ? 15 : 12,
-        glow: true,
         weight: i === 0 ? "700" : "500",
         color: "#fff4d6",
       });
