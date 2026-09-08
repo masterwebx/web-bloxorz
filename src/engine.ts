@@ -168,6 +168,7 @@ export class Stage {
   selectTimer = 0;
   won = false;
   failed = false;
+  assemble = 1;
 
   constructor(def: LevelDef) {
     this.def = def;
@@ -382,6 +383,7 @@ export class Stage {
       if (b.flash > 0) b.flash = Math.max(0, b.flash - dt);
     }
     if (this.selectTimer > 0) this.selectTimer = Math.max(0, this.selectTimer - dt);
+    if (this.assemble < 1) this.assemble = Math.min(1, this.assemble + dt / 1.25);
     if (this.anim) {
       this.anim.t += dt;
       if (this.anim.t >= this.anim.dur) this.anim.t = this.anim.dur;

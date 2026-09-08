@@ -5,7 +5,6 @@ import { Renderer, fitCamera, formatTime, MENU_COUNT, MENU_Y } from "./render";
 
 type Screen =
   | "boot"
-  | "publisher"
   | "author"
   | "menu"
   | "ask"
@@ -40,12 +39,13 @@ let glitchX = 0;
 let sessionMoves = 0;
 let sessionFails = 0;
 let sessionStart = 0;
-let pendingResult: "ok" | "fail" | "win" | "split" | null = null;
+let pendingResult: "ok" | "fail" | "win" | "split" | "assemble" | null = null;
 let busy = false;
 let splashT = 0;
 let askIndex = 0;
 let spinFrame = 0;
 let spinTick = 0;
+let resumeAt: number | null = null;
 
 function now(): number {
   return performance.now();
@@ -66,7 +66,9 @@ function beginLevel(index: number, withTitle: boolean): void {
     return;
   }
   stage = new Stage(LEVELS[index]);
+  stage.assemble = 0;
   renderer.cam = fitCamera(stage);
+  resumeAt = index;
   if (withTitle) {
     screen = "title";
     titleT = 0;
@@ -80,11 +82,16 @@ function beginLevel(index: number, withTitle: boolean): void {
 function enterPlay(): void {
   if (!stage) return;
   screen = "play";
+  canvas.focus();
+  sound.startAmbient();
+  if (stage.assemble < 1) {
+    busy = true;
+    pendingResult = "assemble";
+    return;
+  }
   stage.dropIn();
   busy = true;
   pendingResult = null;
-  canvas.focus();
-  sound.startAmbient();
   sound.play("drop_in", { volume: 0.8 });
 }
 
@@ -165,7 +172,7 @@ function keyDir(key: string): Dir | null {
 }
 
 function onKey(e: KeyboardEvent): void {
-  if (e.repeat && (screen === "play" || screen === "publisher" || screen === "author")) return;
+  if (e.repeat && (screen === "play" || screen === "author")) return;
   if (screen === "boot") {
     unlock();
     return;
@@ -205,7 +212,7 @@ function onKey(e: KeyboardEvent): void {
     return;
   }
 
-  if (screen === "publisher" || screen === "author") {
+  if (screen === "author") {
     if (!e.repeat && splashT >= 1.25) advanceSplash();
     return;
   }
@@ -267,18 +274,14 @@ function onKey(e: KeyboardEvent): void {
   }
 
   if (screen === "pause") {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      pauseIndex = pauseIndex === 0 ? 1 : 0;
+    if (e.key === "ArrowDown") {
+      pauseIndex = (pauseIndex + 1) % 3;
+      sound.play("hover");
+    } else if (e.key === "ArrowUp") {
+      pauseIndex = (pauseIndex + 2) % 3;
       sound.play("hover");
     } else if (e.key === "Enter" || e.key === " ") {
-      if (pauseIndex === 0) {
-        screen = "play";
-        sound.play("click");
-      } else {
-        screen = "menu";
-        sound.play("click");
-        sound.startMenu();
-      }
+      choosePause(pauseIndex);
     } else if (e.key === "Escape") {
       screen = "play";
       sound.play("click");
@@ -330,11 +333,15 @@ function chooseMenu(i: number): void {
     askIndex = 0;
     screen = "ask";
   } else if (i === 1) {
+    if (resumeAt === null) return;
+    startSession();
+    beginLevel(resumeAt, true);
+  } else if (i === 2) {
     loadCode = "";
     loadCursor = 0;
     loadInvalid = false;
     screen = "load";
-  } else if (i === 2) {
+  } else if (i === 3) {
     const muted = sound.toggleMute();
     if (!muted) sound.startMenu();
   } else {
@@ -351,6 +358,22 @@ function chooseAsk(i: number): void {
   } else {
     startSession();
     beginLevel(0, true);
+  }
+}
+
+function choosePause(i: number): void {
+  if (i === 0) {
+    screen = "play";
+    sound.play("click");
+  } else if (i === 1) {
+    const muted = sound.toggleMute();
+    if (!muted) sound.startAmbient();
+    sound.play("click");
+  } else {
+    resumeAt = levelIndex;
+    screen = "menu";
+    sound.play("click");
+    sound.startMenu();
   }
 }
 
@@ -390,18 +413,12 @@ function restartLevel(): void {
 
 function unlock(): void {
   sound.unlock();
-  screen = "publisher";
+  screen = "author";
   splashT = 0;
   sound.play("splash", { volume: 0.9 });
 }
 
 function advanceSplash(): void {
-  if (screen === "publisher") {
-    screen = "author";
-    splashT = 0;
-    sound.play("splash", { volume: 0.7 });
-    return;
-  }
   screen = "menu";
   sound.startMenu();
 }
@@ -428,7 +445,7 @@ canvas.addEventListener("pointerdown", (e) => {
     }
     return;
   }
-  if (screen === "publisher" || screen === "author") {
+  if (screen === "author") {
     if (splashT >= 1.25) advanceSplash();
     return;
   }
@@ -460,18 +477,15 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "pause") {
-    if (p.x > 100 && p.x < 280 && p.y > 140 && p.y < 172) {
-      screen = "play";
-      sound.play("click");
-    } else if (p.x > 100 && p.x < 280 && p.y > 172 && p.y < 200) {
-      screen = "menu";
-      sound.play("click");
-      sound.startMenu();
+    if (p.x >= 28 && p.x <= 264 && p.y >= 154 && p.y <= 250) {
+      const i = Math.max(0, Math.min(2, Math.floor((p.y - 154) / 32)));
+      pauseIndex = i;
+      choosePause(i);
     }
     return;
   }
   if (screen === "play") {
-    if (p.x > STAGE_W - 50 && p.y > STAGE_H - 28) {
+    if (renderer.hitMenuTab(p.x, p.y)) {
       pauseIndex = 0;
       screen = "pause";
       sound.play("click");
@@ -526,14 +540,7 @@ function update(dt: number): void {
   }
   tutorialOffset += (0 - tutorialOffset) * Math.min(1, dt * 10);
 
-  if (screen === "publisher") {
-    splashT += dt;
-    if (splashT > 3.1) {
-      screen = "author";
-      splashT = 0;
-      sound.play("splash", { volume: 0.7 });
-    }
-  } else if (screen === "author") {
+  if (screen === "author") {
     splashT += dt;
     if (splashT > 4.2) {
       screen = "menu";
@@ -543,7 +550,14 @@ function update(dt: number): void {
 
   if ((screen === "play" || screen === "pause") && stage) {
     stage.tick(dt);
-    if (busy && stage.anim && stage.anim.t >= stage.anim.dur) {
+    if (pendingResult === "assemble") {
+      if (stage.assemble >= 1) {
+        pendingResult = null;
+        stage.dropIn();
+        busy = true;
+        sound.play("drop_in", { volume: 0.8 });
+      }
+    } else if (busy && stage.anim && stage.anim.t >= stage.anim.dur) {
       const kind = stage.anim.kind;
       if (kind === "roll") {
         handlePlayResult();
@@ -574,34 +588,33 @@ function draw(): void {
   renderer.clear();
   if (screen === "boot") {
     renderer.drawBg("menu");
-    renderer.drawLogo(5, 162, 92);
+    renderer.drawLogo(5, 36, 52);
     renderer.ctx.save();
     renderer.ctx.fillStyle = "#ffc37a";
     renderer.ctx.font = "16px Trebuchet MS, sans-serif";
-    renderer.ctx.textAlign = "center";
-    renderer.ctx.fillText("Click or press any key to start", STAGE_W / 2, 260);
+    renderer.ctx.textAlign = "left";
+    renderer.ctx.fillText("Click or press any key to start", 42, 300);
     renderer.ctx.restore();
     return;
   }
 
-  if (screen === "publisher" || screen === "author") {
+  if (screen === "author") {
     const fade =
       splashT < 0.28
         ? splashT / 0.28
-        : splashT > (screen === "publisher" ? 2.8 : 3.9)
-          ? Math.max(0, ((screen === "publisher" ? 3.1 : 4.2) - splashT) / 0.3)
+        : splashT > 3.9
+          ? Math.max(0, (4.2 - splashT) / 0.3)
           : 1;
-    if (screen === "publisher") renderer.drawPublisherSplash(fade);
-    else renderer.drawAuthorCard(fade);
+    renderer.drawAuthorCard(fade);
     return;
   }
 
   if (screen === "menu" || screen === "load" || screen === "credits" || screen === "ask") {
     renderer.drawBg("menu");
-    renderer.drawLogo(logoFrame, 162, 72, glitchX);
-    renderer.drawSpinBlock(spinFrame, 318, 138);
+    renderer.drawLogo(logoFrame, 32, 48, glitchX);
+    renderer.drawSpinBlock(spinFrame, 308, 92);
     if (screen === "menu" || screen === "ask") {
-      renderer.drawMenuButtons(menuIndex, MENU_Y, menuHover, sound.muted);
+      renderer.drawMenuButtons(menuIndex, MENU_Y, menuHover, sound.muted, resumeAt !== null);
     }
     if (screen === "load") renderer.drawLoad(loadCode, Math.min(loadCursor, 5), loadInvalid);
     if (screen === "credits") renderer.drawCredits();
@@ -634,7 +647,7 @@ function draw(): void {
     renderer.drawLevel(stage);
     renderer.drawHud(stage.def.code, stage.moves);
     if (screen === "pause") {
-      renderer.drawPause(pauseIndex, formatTime(now() - sessionStart), levelIndex, stage.attempts);
+      renderer.drawPause(pauseIndex, formatTime(now() - sessionStart), levelIndex, stage.attempts, sound.muted);
     }
   }
 }

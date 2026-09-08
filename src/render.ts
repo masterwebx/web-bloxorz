@@ -10,23 +10,35 @@ import {
   type Tile,
   W,
 } from "./engine";
+import { drawPixelText, textWidth } from "./font";
 
 const SX = 32.5;
 const SYX = -5;
 const SXY = 10;
 const SY = 17.5;
 const SZ = 23;
-const GROUND = 0.52;
+const GROUND = 0.04;
 const TILE_OX = -2;
 const TILE_OY = -6;
-const BG_W = 551;
-const BG_H = 301;
 const HUD_DIGIT_W = 201 / 10;
 const HUD_DIGIT_H = 23;
-const MENU_X = 148;
-export const MENU_Y = 214;
-export const MENU_GAP = 28;
-export const MENU_COUNT = 4;
+const MENU_X = 42;
+export const MENU_Y = 168;
+export const MENU_GAP = 26;
+export const MENU_COUNT = 5;
+/** 329.png is ordered 1–9, then 0. Values are [sx0, sx1]. */
+const STAGE_DIGIT_RUNS: [number, number][] = [
+  [406, 449],
+  [4, 33],
+  [34, 78],
+  [80, 125],
+  [126, 171],
+  [172, 219],
+  [220, 266],
+  [267, 311],
+  [312, 357],
+  [358, 404],
+];
 
 export function project(x: number, y: number, z: number): { x: number; y: number } {
   return {
@@ -119,16 +131,17 @@ function rollSpec(from: BlockState, dir: Dir, cube: boolean): {
   angle: number;
 } {
   const b = boxFor(from, cube);
+  const z = b.z;
   if (dir === "right") {
-    return { origin: [b.x + b.w, b.y, GROUND], axis: [0, 1, 0], angle: -Math.PI / 2 };
+    return { origin: [b.x + b.w, b.y, z], axis: [0, 1, 0], angle: Math.PI / 2 };
   }
   if (dir === "left") {
-    return { origin: [b.x, b.y, GROUND], axis: [0, 1, 0], angle: Math.PI / 2 };
+    return { origin: [b.x, b.y, z], axis: [0, 1, 0], angle: -Math.PI / 2 };
   }
   if (dir === "down") {
-    return { origin: [b.x, b.y + b.d, GROUND], axis: [1, 0, 0], angle: Math.PI / 2 };
+    return { origin: [b.x, b.y + b.d, z], axis: [1, 0, 0], angle: -Math.PI / 2 };
   }
-  return { origin: [b.x, b.y, GROUND], axis: [1, 0, 0], angle: -Math.PI / 2 };
+  return { origin: [b.x, b.y, z], axis: [1, 0, 0], angle: Math.PI / 2 };
 }
 
 function boxCorners(
@@ -171,17 +184,55 @@ function ease(t: number): number {
   return 0.5 - 0.5 * Math.cos(Math.min(1, Math.max(0, t)) * Math.PI);
 }
 
+function easeOutBack(t: number): number {
+  const c = 1.12;
+  const p = t - 1;
+  return 1 + c * p * p * p + (c - 1) * p * p;
+}
+
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   cam: Camera = { x: 0, y: 0 };
   private noise: CanvasPattern;
+  private rust: CanvasPattern;
+  private knockCache = new Map<HTMLImageElement, HTMLCanvasElement>();
 
   constructor(
     canvas: HTMLCanvasElement,
     private assets: Assets,
   ) {
     this.ctx = canvas.getContext("2d")!;
+    this.ctx.imageSmoothingEnabled = true;
     this.noise = this.makeNoise();
+    this.rust = this.makeRust();
+  }
+
+  private makeRust(): CanvasPattern {
+    const src = this.assets.block.up;
+    const c = document.createElement("canvas");
+    c.width = 28;
+    c.height = 28;
+    const g = c.getContext("2d")!;
+    g.drawImage(src, 90, 52, 28, 28, 0, 0, 28, 28);
+    return this.ctx.createPattern(c, "repeat") ?? this.noise;
+  }
+
+  private knocked(img: HTMLImageElement): HTMLCanvasElement {
+    let c = this.knockCache.get(img);
+    if (c) return c;
+    c = document.createElement("canvas");
+    c.width = img.width;
+    c.height = img.height;
+    const g = c.getContext("2d")!;
+    g.drawImage(img, 0, 0);
+    const data = g.getImageData(0, 0, c.width, c.height);
+    const px = data.data;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i] < 12 && px[i + 1] < 12 && px[i + 2] < 12) px[i + 3] = 0;
+    }
+    g.putImageData(data, 0, 0);
+    this.knockCache.set(img, c);
+    return c;
   }
 
   private makeNoise(): CanvasPattern {
@@ -218,20 +269,35 @@ export class Renderer {
   }
 
   drawLevel(stage: Stage): void {
+    const intro = stage.assemble;
     for (let y = 0; y < H; y++) {
       for (let x = W - 1; x >= 0; x--) {
         const tile = stage.tileAt(x, y);
         const p = project(x, y, 0);
+        const delay = (x + y) * 0.03;
+        const t = Math.min(1, Math.max(0, (intro - delay) / 0.42));
+        const e = easeOutBack(t);
+        if (e <= 0.01) continue;
+        const lift = (1 - Math.min(1, e)) * (88 + (x + y) * 3);
+        const drift = (1 - Math.min(1, e)) * ((x - 7) * 14 + (y % 2 === 0 ? -10 : 12));
+        this.ctx.save();
+        this.ctx.globalAlpha = Math.min(1, t * 1.4);
         if (tile === "bridgeL" || tile === "bridgeR") {
           const b = stage.bridgeAt(x, y)!;
           const vis = b.frame / 7;
-          if (vis <= 0.02) continue;
-          this.ctx.save();
-          this.ctx.globalAlpha = Math.min(1, vis);
+          if (vis <= 0.02) {
+            this.ctx.restore();
+            continue;
+          }
+          this.ctx.globalAlpha = Math.min(1, t * 1.4) * Math.min(1, vis);
           const rise = (1 - vis) * 10;
-          this.ctx.drawImage(this.assets.tiles.stone, this.cam.x + p.x + TILE_OX, this.cam.y + p.y + TILE_OY + rise);
+          this.ctx.drawImage(
+            this.assets.tiles.stone,
+            this.cam.x + p.x + TILE_OX + drift,
+            this.cam.y + p.y + TILE_OY + rise - lift,
+          );
           if (b.flash > 0) {
-            this.ctx.globalAlpha = Math.min(0.7, b.flash * 2);
+            this.ctx.globalAlpha = Math.min(0.7, b.flash * 2) * Math.min(1, t * 1.4);
             this.ctx.fillStyle = b.flashOn ? "rgba(70,255,90,0.7)" : "rgba(255,50,40,0.7)";
             this.drawTileOverlay(x, y);
           }
@@ -239,12 +305,18 @@ export class Renderer {
           continue;
         }
         const img = tileImage(this.assets, tile);
-        if (!img) continue;
-        this.ctx.drawImage(img, this.cam.x + p.x + TILE_OX, this.cam.y + p.y + TILE_OY);
+        if (!img) {
+          this.ctx.restore();
+          continue;
+        }
+        this.ctx.drawImage(img, this.cam.x + p.x + TILE_OX + drift, this.cam.y + p.y + TILE_OY - lift);
+        this.ctx.restore();
       }
     }
 
-    for (const it of this.blockDrawables(stage)) it.draw();
+    if (intro >= 1) {
+      for (const it of this.blockDrawables(stage)) it.draw();
+    }
   }
 
   private drawTileOverlay(x: number, y: number): void {
@@ -311,6 +383,17 @@ export class Renderer {
   }
 
   drawBox(state: BlockState, anim: Anim | null, cube: boolean, which: 0 | 1 = 0): void {
+    const moving =
+      anim &&
+      (anim.kind === "roll" ||
+        anim.kind === "fall" ||
+        anim.kind === "sink" ||
+        anim.kind === "drop" ||
+        anim.kind === "splitdrop");
+    if (!moving) {
+      this.drawBlockSprite(state, cube);
+      return;
+    }
     const ctx = this.ctx;
     let extraZ = 0;
     let alpha = 1;
@@ -319,13 +402,13 @@ export class Renderer {
 
     if (anim?.kind === "roll" && anim.dir) {
       const t = ease(anim.t / anim.dur);
-      const from = cube ? anim.from : anim.from;
+      const from = anim.from;
       boxState = from;
       const spec = rollSpec(from, anim.dir, cube);
       roll = { ...spec, angle: spec.angle * t };
     } else if (anim?.kind === "drop") {
       const t = ease(anim.t / anim.dur);
-      extraZ = (1 - t) * 6;
+      extraZ = (1 - t) * 6.5;
       boxState = anim.to;
     } else if (anim?.kind === "splitdrop") {
       const t = ease(anim.t / anim.dur);
@@ -335,11 +418,11 @@ export class Renderer {
         : { x: anim.to2!.x, y: anim.to2!.y, ori: "up" };
     } else if (anim?.kind === "fall") {
       const t = anim.t / anim.dur;
-      extraZ = -t * 7;
-      alpha = 1 - t * 0.85;
+      extraZ = -t * t * 9;
+      alpha = 1 - t * 0.9;
       if (anim.dir) {
         const spec = rollSpec(anim.from, anim.dir, cube);
-        roll = { ...spec, angle: spec.angle + t * spec.angle };
+        roll = { ...spec, angle: spec.angle * (1 + 0.4 * t) };
       }
       boxState = anim.from;
     } else if (anim?.kind === "sink") {
@@ -350,8 +433,10 @@ export class Renderer {
     }
 
     const box = boxFor(boxState, cube);
-    box.z += extraZ;
     const corners = boxCorners(box, roll);
+    if (extraZ !== 0) {
+      for (const c of corners) c[2] += extraZ;
+    }
     const screen = corners.map((c) => {
       const p = project(c[0], c[1], c[2]);
       return { x: this.cam.x + p.x, y: this.cam.y + p.y, z: c[2], d: p.y };
@@ -370,9 +455,10 @@ export class Renderer {
 
     ctx.save();
     ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = "source-over";
     for (const f of faces) {
-      if (f.fi === 1 && extraZ >= -0.05) continue;
-      if (f.cross < -12) continue;
+      if (f.cross <= 0) continue;
+      if (f.fi === 1 && extraZ >= -0.08) continue;
       ctx.beginPath();
       ctx.moveTo(f.pts[0].x, f.pts[0].y);
       for (let i = 1; i < 4; i++) ctx.lineTo(f.pts[i].x, f.pts[i].y);
@@ -382,32 +468,75 @@ export class Renderer {
       ctx.fill();
       ctx.save();
       ctx.clip();
-      ctx.globalAlpha = alpha * 0.35;
-      ctx.fillStyle = this.noise;
+      ctx.fillStyle = this.rust;
+      ctx.globalAlpha = alpha * 0.55;
       ctx.fill();
       ctx.restore();
-      ctx.strokeStyle = "rgba(20,12,10,0.45)";
-      ctx.lineWidth = 0.7;
+      ctx.strokeStyle = "rgba(22,12,8,0.85)";
+      ctx.lineWidth = 1.15;
       ctx.stroke();
     }
     ctx.restore();
   }
 
+  private drawBlockSprite(state: BlockState, cube: boolean): void {
+    const img = cube
+      ? this.assets.block.cube
+      : state.ori === "up"
+        ? this.assets.block.up
+        : state.ori === "forward"
+          ? this.assets.block.forward
+          : this.assets.block.right;
+    const p = project(state.x, state.y, 0);
+    const foot =
+      cube || state.ori === "up"
+        ? { ax: 93, ay: 114, sx: 10, sy: 17.5 }
+        : state.ori === "forward"
+          ? { ax: 82, ay: 98, sx: 20, sy: 35 }
+          : { ax: 124, ay: 109, sx: 10, sy: 17.5 };
+    const x = this.cam.x + p.x + foot.sx - foot.ax;
+    const y = this.cam.y + p.y + foot.sy - foot.ay;
+    this.ctx.drawImage(this.knocked(img), x, y);
+  }
+
   drawHud(code: string, moves: number): void {
     const ctx = this.ctx;
-    const sy = STAGE_H / BG_H;
-    const sx = STAGE_W / BG_W;
     ctx.save();
-    ctx.font = "bold 13px Courier New, monospace";
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#1a120c";
-    ctx.fillText(code, 478 * sx, 16.2 * sy);
-    ctx.fillText(String(moves), 478 * sx, 31.2 * sy);
-    ctx.font = "11px Trebuchet MS, sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(255,200,140,0.7)";
-    ctx.fillText("menu", STAGE_W - 12, STAGE_H - 12);
+    ctx.imageSmoothingEnabled = false;
+    const g = ctx.createLinearGradient(388, 0, 550, 48);
+    g.addColorStop(0, "rgb(210, 88, 22)");
+    g.addColorStop(1, "rgb(194, 48, 0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(388, 0, 162, 46);
+    this.drawMenuTab();
+    const ink = "#140c08";
+    drawPixelText(ctx, "Passcode:", 396, 8, ink, 1);
+    drawPixelText(ctx, code, 396 + textWidth("Passcode:", 1) + 4, 8, ink, 1);
+    drawPixelText(ctx, "Moves:", 421, 24, ink, 1);
+    drawPixelText(ctx, String(moves).padStart(6, "0"), 421 + textWidth("Moves:", 1) + 4, 24, ink, 1);
     ctx.restore();
+  }
+
+  drawMenuTab(): void {
+    const ctx = this.ctx;
+    const x = 10;
+    const y = 8;
+    const w = 52;
+    const h = 16;
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, "#e0a050");
+    g.addColorStop(0.45, "#c07028");
+    g.addColorStop(1, "#8a4018");
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "rgba(40, 16, 4, 0.55)";
+    ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+    ctx.imageSmoothingEnabled = false;
+    drawPixelText(ctx, "Menu", x + 10, y + 4, "#140c08", 1);
+  }
+
+  hitMenuTab(mx: number, my: number): boolean {
+    return mx >= 10 && mx <= 62 && my >= 8 && my <= 24;
   }
 
   private drawSpriteDigits(
@@ -426,10 +555,10 @@ export class Renderer {
   }
 
   drawDigit(digit: number, x: number, y: number, scale = 1): void {
-    const srcW = 45;
+    const [sx0, sx1] = STAGE_DIGIT_RUNS[digit] ?? STAGE_DIGIT_RUNS[0];
+    const srcW = sx1 - sx0;
     const srcH = 43;
-    const i = digit === 0 ? 9 : digit - 1;
-    this.ctx.drawImage(this.assets.ui.numbers, i * srcW, 0, srcW, srcH, x, y, srcW * scale, srcH * scale);
+    this.ctx.drawImage(this.knocked(this.assets.ui.numbers), sx0, 0, srcW, srcH, x, y, srcW * scale, srcH * scale);
   }
 
   drawTitle(levelIndex: number, alpha: number, shake: { x: number; y: number }): void {
@@ -439,17 +568,23 @@ export class Renderer {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
     const n = levelIndex + 1;
-    const x = 118 + shake.x;
+    const stageImg = this.assets.ui.stage;
+    const tens = Math.floor(n / 10);
+    const ones = n % 10;
+    const tensW = (STAGE_DIGIT_RUNS[tens][1] - STAGE_DIGIT_RUNS[tens][0]);
+    const onesW = (STAGE_DIGIT_RUNS[ones][1] - STAGE_DIGIT_RUNS[ones][0]);
+    const total = 168 + tensW + 4 + onesW;
+    const x = Math.round((STAGE_W - total) / 2) + shake.x;
     const y = 168 + shake.y;
-    ctx.drawImage(this.assets.ui.stage, x, y);
-    this.drawDigit(Math.floor(n / 10), x + 228, y - 2);
-    this.drawDigit(n % 10, x + 268, y - 2);
+    ctx.drawImage(this.knocked(stageImg), x, y);
+    this.drawDigit(tens, x + 164, y);
+    this.drawDigit(ones, x + 164 + tensW + 4, y);
     ctx.restore();
   }
 
   drawLogo(frame: number, x: number, y: number, glitch = 0): void {
     const img = this.assets.ui.logo[Math.max(0, Math.min(5, frame))];
-    this.ctx.drawImage(img, x + glitch, y);
+    this.ctx.drawImage(this.knocked(img), x + glitch, y);
   }
 
   drawMenuButtons(
@@ -457,9 +592,11 @@ export class Renderer {
     originY: number,
     hover: number | null,
     muted: boolean,
+    canResume: boolean,
   ): void {
-    const labels = [
+    const labels: (HTMLImageElement | string)[] = [
       this.assets.ui.startNew,
+      "Resume Game",
       this.assets.ui.loadStage,
       this.assets.ui.toggleSound,
       this.assets.ui.credits,
@@ -467,28 +604,62 @@ export class Renderer {
     labels.forEach((img, i) => {
       const y = originY + i * MENU_GAP;
       const active = i === selected || i === hover;
+      const dim = i === 1 && !canResume;
       this.ctx.save();
-      this.ctx.globalAlpha = active ? 1 : 0.78;
-      if (active) {
-        this.ctx.fillStyle = "#fff4d6";
+      this.ctx.globalAlpha = dim ? 0.32 : active ? 1 : 0.9;
+      if (active && !dim) {
+        this.ctx.fillStyle = "#fff8e0";
+        this.ctx.shadowColor = "#c05018";
+        this.ctx.shadowBlur = 8;
         this.ctx.font = "16px Trebuchet MS, Verdana, sans-serif";
-        this.ctx.fillText(">", MENU_X - 18, y + 16);
+        this.ctx.fillText(">", MENU_X - 16, y + 16);
       }
-      this.ctx.drawImage(img, MENU_X, y);
-      if (i === 2) {
-        this.ctx.font = "11px Trebuchet MS, sans-serif";
-        this.ctx.fillStyle = "#c8b090";
-        this.ctx.fillText(muted ? "Off" : "On", MENU_X + img.width + 10, y + 16);
+      if (typeof img === "string") this.drawGlowLabel(img, MENU_X + 4, y + 16);
+      else this.ctx.drawImage(this.knocked(img), MENU_X, y);
+      if (i === 3) {
+        this.drawGlowLabel(muted ? "Off" : "On", MENU_X + 148, y + 16);
       }
       this.ctx.restore();
     });
   }
 
+  private drawGlowLabel(text: string, x: number, y: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = "bold 15px Trebuchet MS, Verdana, sans-serif";
+    ctx.textAlign = "left";
+    ctx.shadowColor = "#c04010";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "#ffb060";
+    ctx.fillText(text, x, y);
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = "#fff8e8";
+    ctx.fillText(text, x, y);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
   drawSpinBlock(frame: number, x: number, y: number): void {
     const frames = this.assets.block.spin;
     const img = frames[Math.max(0, Math.min(frames.length - 1, frame))];
-    const scale = 0.72;
-    this.ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+    const scale = 0.92;
+    this.ctx.save();
+    const gx = x + 48;
+    const gy = y + 72;
+    const glow = this.ctx.createRadialGradient(gx, gy, 8, gx, gy, 110);
+    glow.addColorStop(0, "rgba(255, 110, 30, 0.55)");
+    glow.addColorStop(0.45, "rgba(180, 50, 10, 0.22)");
+    glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+    this.ctx.fillStyle = glow;
+    this.ctx.beginPath();
+    this.ctx.arc(gx, gy, 110, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.shadowColor = "#c05018";
+    this.ctx.shadowBlur = 26;
+    this.ctx.drawImage(this.knocked(img), x, y, img.width * scale, img.height * scale);
+    this.ctx.restore();
   }
 
   drawAskInstructions(selected: number): void {
@@ -580,7 +751,7 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.save();
     const label = this.assets.ui.typePasscode;
-    ctx.drawImage(label, (STAGE_W - label.width) / 2, 198);
+    ctx.drawImage(this.knocked(label), (STAGE_W - label.width) / 2, 198);
     const dw = 18;
     const dh = 20;
     const startX = STAGE_W / 2 - (6 * dw) / 2;
@@ -601,8 +772,8 @@ export class Renderer {
         ctx.fillText("^", x + dw / 2, 270);
       }
     });
-    ctx.drawImage(this.assets.ui.enter, STAGE_W / 2 - 40, 286);
-    ctx.drawImage(this.assets.ui.backMenu, 24, STAGE_H - 36);
+    ctx.drawImage(this.knocked(this.assets.ui.enter), STAGE_W / 2 - 40, 286);
+    ctx.drawImage(this.knocked(this.assets.ui.backMenu), 24, STAGE_H - 36);
     if (invalid) {
       ctx.fillStyle = "#ff6a55";
       ctx.font = "14px Trebuchet MS, sans-serif";
@@ -636,32 +807,48 @@ export class Renderer {
     return null;
   }
 
-  drawPause(selected: number, time: string, stage: number, attempts: number): void {
+  drawPause(selected: number, time: string, stage: number, attempts: number, muted: boolean): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
-    ctx.fillStyle = "rgba(10,6,4,0.82)";
-    ctx.fillRect(80, 110, 390, 180);
-    ctx.strokeStyle = "rgba(255,180,100,0.35)";
-    ctx.strokeRect(80.5, 110.5, 390, 180);
-    const opts = [this.assets.ui.returnGame, this.assets.ui.quitMenu];
+    this.drawMenuTab();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(28, 138, 236, 128);
+    ctx.fillRect(300, 154, 220, 100);
+    const opts: (HTMLImageElement | string)[] = [
+      this.assets.ui.returnGame,
+      this.assets.ui.toggleSound,
+      this.assets.ui.quitMenu,
+    ];
     opts.forEach((img, i) => {
-      const y = 148 + i * 32;
-      if (i === selected) {
-        ctx.fillStyle = "#fff4d6";
-        ctx.font = "16px Trebuchet MS, sans-serif";
-        ctx.fillText(">", 96, y + 16);
+      const y = 154 + i * 32;
+      const active = i === selected;
+      ctx.save();
+      ctx.globalAlpha = active ? 1 : 0.9;
+      if (active) {
+        ctx.fillStyle = "#fff8e0";
+        ctx.shadowColor = "#c05018";
+        ctx.shadowBlur = 8;
+        ctx.font = "16px Trebuchet MS, Verdana, sans-serif";
+        ctx.fillText(">", 36, y + 16);
       }
-      ctx.drawImage(img, 118, y);
+      if (typeof img === "string") this.drawGlowLabel(img, 56, y + 16);
+      else ctx.drawImage(this.knocked(img), 54, y);
+      if (i === 1) this.drawGlowLabel(muted ? "Off" : "On", 196, y + 16);
+      ctx.restore();
     });
-    ctx.drawImage(this.assets.ui.pauseStats, 310, 148);
-    ctx.fillStyle = "#fff4d6";
-    ctx.font = "13px Trebuchet MS, sans-serif";
+    ctx.drawImage(this.knocked(this.assets.ui.pauseStats), 318, 164);
+    ctx.save();
+    ctx.shadowColor = "#c05018";
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = "#fff4e0";
+    ctx.font = "14px Trebuchet MS, sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText(time, 450, 166);
-    ctx.fillText(String(stage + 1).padStart(2, "0"), 450, 188);
-    ctx.fillText(String(attempts), 450, 210);
+    ctx.fillText(time, 504, 186);
+    ctx.fillText(String(stage + 1).padStart(2, "0"), 504, 210);
+    ctx.fillText(String(attempts), 504, 234);
+    ctx.restore();
     ctx.restore();
   }
 
@@ -787,5 +974,5 @@ export function formatTime(ms: number): string {
   const hh = Math.floor(s / 3600);
   const mm = Math.floor((s % 3600) / 60);
   const ss = s % 60;
-  return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  return `${String(hh).padStart(2, "0")}.${String(mm).padStart(2, "0")}.${String(ss).padStart(2, "0")}`;
 }
