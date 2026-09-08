@@ -6,6 +6,7 @@ import {
   type Anim,
   type BlockState,
   type Cell,
+  type Dir,
   type Stage,
   type Tile,
   W,
@@ -18,6 +19,7 @@ const SY = 17.5;
 const SZ = 23;
 const TILE_OX = -2;
 const TILE_OY = -6;
+const GROUND = 0.04;
 const MENU_X = 42;
 export const MENU_Y = 148;
 export const MENU_GAP = 22;
@@ -26,9 +28,6 @@ export const PAUSE_COUNT = 4;
 const SETTINGS_Y = 152;
 const SETTINGS_GAP = 17;
 const UI_FONT = "Orbitron, sans-serif";
-/** Shared SWF registration for every 201×151 block frame. */
-const SPRITE_OX = -77;
-const SPRITE_OY = -94;
 
 export function project(x: number, y: number, z: number): { x: number; y: number } {
   return {
@@ -103,10 +102,107 @@ function easeOutBack(t: number): number {
   return 1 + c * p * p * p + (c - 1) * p * p;
 }
 
+function rotateAround(
+  p: [number, number, number],
+  origin: [number, number, number],
+  axis: [number, number, number],
+  angle: number,
+): [number, number, number] {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const [ox, oy, oz] = origin;
+  const x = p[0] - ox;
+  const y = p[1] - oy;
+  const z = p[2] - oz;
+  const [ax, ay, az] = axis;
+  const dot = x * ax + y * ay + z * az;
+  const cx = ay * z - az * y;
+  const cy = az * x - ax * z;
+  const cz = ax * y - ay * x;
+  return [
+    ox + x * c + cx * s + ax * dot * (1 - c),
+    oy + y * c + cy * s + ay * dot * (1 - c),
+    oz + z * c + cz * s + az * dot * (1 - c),
+  ];
+}
+
+function boxFor(block: BlockState, cube = false): { x: number; y: number; z: number; w: number; d: number; h: number } {
+  if (cube) return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 1 };
+  if (block.ori === "up") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 2 };
+  if (block.ori === "forward") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 2, h: 1 };
+  return { x: block.x, y: block.y, z: GROUND, w: 2, d: 1, h: 1 };
+}
+
+function rollSpec(from: BlockState, dir: Dir, cube: boolean): {
+  origin: [number, number, number];
+  axis: [number, number, number];
+  angle: number;
+} {
+  const b = boxFor(from, cube);
+  const z = b.z;
+  if (dir === "right") return { origin: [b.x + b.w, b.y, z], axis: [0, 1, 0], angle: Math.PI / 2 };
+  if (dir === "left") return { origin: [b.x, b.y, z], axis: [0, 1, 0], angle: -Math.PI / 2 };
+  if (dir === "down") return { origin: [b.x, b.y + b.d, z], axis: [1, 0, 0], angle: -Math.PI / 2 };
+  return { origin: [b.x, b.y, z], axis: [1, 0, 0], angle: Math.PI / 2 };
+}
+
+function boxCorners(
+  box: { x: number; y: number; z: number; w: number; d: number; h: number },
+  roll?: { origin: [number, number, number]; axis: [number, number, number]; angle: number },
+): [number, number, number][] {
+  const pts: [number, number, number][] = [
+    [box.x, box.y, box.z],
+    [box.x + box.w, box.y, box.z],
+    [box.x + box.w, box.y + box.d, box.z],
+    [box.x, box.y + box.d, box.z],
+    [box.x, box.y, box.z + box.h],
+    [box.x + box.w, box.y, box.z + box.h],
+    [box.x + box.w, box.y + box.d, box.z + box.h],
+    [box.x, box.y + box.d, box.z + box.h],
+  ];
+  if (!roll) return pts;
+  return pts.map((p) => rotateAround(p, roll.origin, roll.axis, roll.angle));
+}
+
+const FACES: number[][] = [
+  [4, 5, 6, 7],
+  [0, 3, 2, 1],
+  [0, 1, 5, 4],
+  [1, 2, 6, 5],
+  [2, 3, 7, 6],
+  [3, 0, 4, 7],
+];
+
+function cropPatch(
+  src: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  tw: number,
+  th: number,
+): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = tw;
+  c.height = th;
+  const g = c.getContext("2d")!;
+  g.imageSmoothingEnabled = true;
+  g.drawImage(src, sx, sy, sw, sh, 0, 0, tw, th);
+  return c;
+}
+
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   cam: Camera = { x: 0, y: 0 };
   private knockCache = new Map<HTMLImageElement, HTMLCanvasElement>();
+  private rust: {
+    top: HTMLCanvasElement;
+    sideA: HTMLCanvasElement;
+    sideB: HTMLCanvasElement;
+    cubeTop: HTMLCanvasElement;
+    cubeA: HTMLCanvasElement;
+    cubeB: HTMLCanvasElement;
+  };
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -114,6 +210,16 @@ export class Renderer {
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
+    const up = this.knocked(assets.block.up);
+    const cube = this.knocked(assets.block.cube);
+    this.rust = {
+      top: cropPatch(up, 86, 38, 32, 18, 64, 64),
+      sideA: cropPatch(up, 82, 54, 18, 58, 48, 128),
+      sideB: cropPatch(up, 104, 54, 20, 58, 48, 128),
+      cubeTop: cropPatch(cube, 86, 66, 32, 16, 64, 64),
+      cubeA: cropPatch(cube, 82, 82, 18, 32, 64, 64),
+      cubeB: cropPatch(cube, 104, 82, 20, 32, 64, 64),
+    };
   }
 
   private knocked(img: HTMLImageElement): HTMLCanvasElement {
@@ -273,59 +379,122 @@ export class Renderer {
   }
 
   drawBox(state: BlockState, anim: Anim | null, cube: boolean, which: 0 | 1 = 0): void {
-    const moving =
-      anim &&
-      (anim.kind === "roll" ||
-        anim.kind === "fall" ||
-        anim.kind === "sink" ||
-        anim.kind === "drop" ||
-        anim.kind === "splitdrop");
-    if (!moving) {
-      this.drawBlockShadow(state, cube, 0.42);
-      this.blitBlock(this.idleImage(state, cube), state.x, state.y);
-      return;
-    }
+    let extraZ = 0;
+    let alpha = 1;
+    let roll: { origin: [number, number, number]; axis: [number, number, number]; angle: number } | undefined;
+    let boxState = state;
+
     if (anim?.kind === "drop") {
       const t = ease(anim.t / anim.dur);
-      this.drawBlockShadow(anim.to, cube, 0.15 + t * 0.3);
-      this.blitBlock(this.idleImage(anim.to, cube), anim.to.x, anim.to.y, (1 - t) * 155);
-      return;
-    }
-    if (anim?.kind === "splitdrop") {
+      extraZ = (1 - t) * 6.7;
+      boxState = anim.to;
+    } else if (anim?.kind === "splitdrop") {
       const t = ease(anim.t / anim.dur);
-      const st: BlockState = which === 0
+      extraZ = (1 - t) * 5.6;
+      cube = true;
+      boxState = which === 0
         ? { x: anim.from.x, y: anim.from.y, ori: "up" }
         : { x: anim.to2!.x, y: anim.to2!.y, ori: "up" };
-      this.drawBlockShadow(st, true, 0.15 + t * 0.3);
-      this.blitBlock(this.assets.block.cube, st.x, st.y, (1 - t) * 130);
-      return;
-    }
-    if (anim?.kind === "roll" && anim.dir) {
-      const u = anim.t / anim.dur;
-      const t = ease(u);
-      const fi = Math.min(7, Math.floor(u * 8));
-      const from = anim.from;
-      const to = anim.to;
-      const pack = cube ? this.assets.block.rolls.cube : this.assets.block.rolls[from.ori];
-      const x = from.x + (to.x - from.x) * t;
-      const y = from.y + (to.y - from.y) * t;
-      const shadow = t < 0.55 ? from : to;
-      this.drawBlockShadow(shadow, cube, 0.38);
-      this.blitBlock(pack[anim.dir][fi], x, y);
-      return;
-    }
-    if (anim?.kind === "sink") {
+    } else if (anim?.kind === "roll" && anim.dir) {
       const t = ease(anim.t / anim.dur);
-      const fi = Math.min(7, Math.floor((anim.t / anim.dur) * 8));
-      this.drawBlockShadow(anim.from, cube, 0.22 * (1 - t));
-      this.blitBlock(this.assets.block.sink[fi], anim.from.x, anim.from.y);
-      return;
-    }
-    if (anim?.kind === "fall") {
+      boxState = anim.from;
+      const spec = rollSpec(anim.from, anim.dir, cube);
+      roll = { ...spec, angle: spec.angle * t };
+    } else if (anim?.kind === "fall") {
       const t = anim.t / anim.dur;
-      this.drawBlockShadow(anim.from, cube, 0.15 * (1 - t));
-      this.blitBlock(this.idleImage(anim.from, cube), anim.from.x, anim.from.y, -t * t * 210, 1 - t * 0.85);
+      extraZ = -t * t * 9;
+      alpha = 1 - t * 0.9;
+      if (anim.dir) {
+        const spec = rollSpec(anim.from, anim.dir, cube);
+        roll = { ...spec, angle: spec.angle * (1 + 0.4 * t) };
+      }
+      boxState = anim.from;
+    } else if (anim?.kind === "sink") {
+      const t = ease(anim.t / anim.dur);
+      extraZ = -t * 2.2;
+      alpha = 1 - t;
+      boxState = anim.from;
     }
+
+    const box = boxFor(boxState, cube);
+    const corners = boxCorners(box, roll);
+    if (extraZ !== 0) {
+      for (const c of corners) c[2] += extraZ;
+    }
+    const screen = corners.map((c) => {
+      const p = project(c[0], c[1], c[2]);
+      return { x: this.cam.x + p.x, y: this.cam.y + p.y, z: c[2], d: p.y };
+    });
+
+    const faces = FACES.map((idx, fi) => {
+      const pts = idx.map((i) => screen[i]);
+      const ax = pts[1].x - pts[0].x;
+      const ay = pts[1].y - pts[0].y;
+      const bx = pts[2].x - pts[1].x;
+      const by = pts[2].y - pts[1].y;
+      const cross = ax * by - ay * bx;
+      const depth = (pts[0].d + pts[1].d + pts[2].d + pts[3].d) / 4;
+      return { pts, cross, depth, fi };
+    }).sort((a, b) => a.depth - b.depth);
+
+    this.drawBlockShadow(
+      boxState,
+      cube,
+      anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38,
+    );
+
+    const tex = cube
+      ? [this.rust.cubeTop, this.rust.cubeTop, this.rust.cubeA, this.rust.cubeB, this.rust.cubeA, this.rust.cubeB]
+      : [this.rust.top, this.rust.top, this.rust.sideA, this.rust.sideB, this.rust.sideA, this.rust.sideB];
+    const shade = [1, 0.32, 0.82, 0.58, 0.7, 0.9];
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (const f of faces) {
+      if (f.cross <= 0) continue;
+      if (f.fi === 1 && extraZ >= -0.08) continue;
+      this.paintFace(tex[f.fi], f.pts, shade[f.fi]);
+    }
+    ctx.restore();
+  }
+
+  private paintFace(
+    tex: HTMLCanvasElement,
+    pts: { x: number; y: number }[],
+    shade: number,
+  ): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.clip();
+    const w = tex.width;
+    const h = tex.height;
+    const p0 = pts[0];
+    const p1 = pts[1];
+    const p3 = pts[3];
+    ctx.setTransform(
+      (p1.x - p0.x) / w,
+      (p1.y - p0.y) / w,
+      (p3.x - p0.x) / h,
+      (p3.y - p0.y) / h,
+      p0.x,
+      p0.y,
+    );
+    ctx.drawImage(tex, 0, 0);
+    ctx.fillStyle = `rgba(8, 4, 2, ${1 - shade})`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.strokeStyle = "rgba(22, 12, 8, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
   private drawBlockShadow(state: BlockState, cube: boolean, alpha: number): void {
@@ -352,21 +521,6 @@ export class Renderer {
     ctx.restore();
   }
 
-  private idleImage(state: BlockState, cube: boolean): HTMLImageElement {
-    if (cube) return this.assets.block.cube;
-    if (state.ori === "up") return this.assets.block.up;
-    if (state.ori === "forward") return this.assets.block.forward;
-    return this.assets.block.right;
-  }
-
-  private blitBlock(img: HTMLImageElement, x: number, y: number, lift = 0, alpha = 1): void {
-    const p = project(x, y, 0);
-    this.ctx.save();
-    this.ctx.globalAlpha = alpha;
-    this.ctx.drawImage(this.knocked(img), this.cam.x + p.x + SPRITE_OX, this.cam.y + p.y + SPRITE_OY - lift);
-    this.ctx.restore();
-  }
-
   private drawUiText(
     text: string,
     x: number,
@@ -385,27 +539,12 @@ export class Renderer {
     ctx.font = `${opts.weight ?? "700"} ${size}px ${UI_FONT}`;
     ctx.textAlign = opts.align ?? "left";
     ctx.textBaseline = "alphabetic";
-    ctx.shadowColor = "transparent";
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    const tx = Math.round(x);
-    const ty = Math.round(y);
-    if (opts.glow) {
-      const w = ctx.measureText(text).width;
-      const cx = opts.align === "center" ? tx : opts.align === "right" ? tx - w / 2 : tx + w / 2;
-      const g = ctx.createRadialGradient(cx, ty - size * 0.35, 2, cx, ty - size * 0.35, Math.max(22, w * 0.42));
-      g.addColorStop(0, "rgba(255, 110, 28, 0.22)");
-      g.addColorStop(1, "rgba(255, 80, 10, 0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.ellipse(cx, ty - size * 0.32, Math.max(18, w * 0.48), size * 0.7, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.fillStyle = "rgba(0, 0, 0, 0.78)";
-    ctx.fillText(text, tx + 1, ty + 1);
+    ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+    ctx.shadowBlur = 1;
     ctx.fillStyle = opts.color ?? "#fff8e8";
-    ctx.fillText(text, tx, ty);
+    ctx.fillText(text, Math.round(x), Math.round(y));
     ctx.restore();
   }
 
