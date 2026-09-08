@@ -121,8 +121,8 @@ export class Renderer {
   }
 
   drawHud(code, moves) {
-    this.font.drawText(this.ctx, `CODE ${padNumber(code, 6, "0")}`, 118, -70, "right");
-    this.font.drawText(this.ctx, `MOVES ${padNumber(moves, 6, " ")}`, 118, -60, "right");
+    this.font.drawText(this.ctx, `CODE ${padNumber(code, 6, "0")}`, 118, -74, "right");
+    this.font.drawText(this.ctx, `MOVES ${padNumber(moves, 6, " ")}`, 118, -66, "right");
   }
 
   drawTitleCard(levelNumber, alpha) {
@@ -136,15 +136,15 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  drawMenuText(lines, selectedIndex, yOffset = 0) {
+  drawMenuText(lines, selectedIndex, yOffset = 0, showCursor = true) {
     lines.forEach((line, i) => {
       const y = 10 + i * 10 + yOffset;
-      if (i === selectedIndex) {
+      if (showCursor && i === selectedIndex) {
         this.font.drawGlyph(this.ctx, CURSOR_GLYPH, -74, y - 6);
       }
       this.font.drawText(this.ctx, line, -68, y - 6);
     });
-    this.font.drawText(this.ctx, "v1.0", 118, 68, "right");
+    this.font.drawText(this.ctx, "v1.0", 118, 74, "right");
   }
 
   drawPasscode(code, selectedDigit, invalidTimer) {

@@ -151,16 +151,16 @@ export class LevelScene {
       this.blockPlayer.basePosition = { x: start.x, y };
       if (this.fallAnimTimer >= FALL_FRAMES) {
         this.blockPlayer.basePosition = start;
+        this.setIdleAnimation();
         this.state = "playing";
       }
       return null;
     }
 
     if (this.state === "animating") {
-      const finished = this.blockPlayer.update();
-      if (this.isSplit && this.block2Player) {
-        this.block2Player.update();
-      }
+      const activePlayer =
+        this.isSplit && this.activeSplit ? this.block2Player : this.blockPlayer;
+      const finished = activePlayer.update();
       if (finished) {
         this.afterMove();
       }
@@ -187,7 +187,7 @@ export class LevelScene {
         this.blockPlayer.playUntilDone();
       }
       if (this.winTimer < 4) return null;
-      if (!this.blockPlayer.done) {
+      if (!this.blockPlayer.isDone()) {
         this.blockPlayer.update();
         return null;
       }
@@ -254,13 +254,13 @@ export class LevelScene {
   move(direction) {
     if (this.isSplit) {
       this.moveSplit(direction);
+      (this.activeSplit ? this.block2Player : this.blockPlayer).playUntilDone();
     } else {
       this.moveBlock(direction);
+      this.blockPlayer.playUntilDone();
     }
     this.movesCount++;
     this.state = "animating";
-    this.blockPlayer.playUntilDone();
-    if (this.isSplit) this.block2Player.playUntilDone();
   }
 
   moveSplit(direction) {
@@ -387,8 +387,30 @@ export class LevelScene {
     }
 
     this.tryJoin();
+    this.setIdleAnimation();
     this.state = "playing";
     this.updateBridges();
+  }
+
+  setIdleAnimation() {
+    if (this.isSplit) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_CUBE);
+      this.blockPlayer.basePosition = blockTileToScreenPos(this.blockPos);
+      if (this.block2Player) {
+        this.block2Player.setAnimation(ANIM.BLOCK_CUBE);
+        this.block2Player.basePosition = blockTileToScreenPos(this.block2Pos);
+      }
+      return;
+    }
+
+    if (this.blockOrientation === ORIENTATION.UP) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_UP);
+    } else if (this.blockOrientation === ORIENTATION.RIGHT) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
+    } else {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_FORWARD);
+    }
+    this.blockPlayer.basePosition = blockTileToScreenPos(this.blockPos);
   }
 
   getFootprintTiles() {
@@ -490,6 +512,7 @@ export class LevelScene {
 
     this.audio.play("whoosh");
     this.activeSplitHighlightTimer = 0;
+    this.setIdleAnimation();
     this.state = "playing";
   }
 

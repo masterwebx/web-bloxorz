@@ -1,24 +1,20 @@
 const GLYPH_W = 8;
 const GLYPH_H = 8;
 
-// Matches Butano common_variable_8x8_font tile order (starts at '!')
 const CHARS =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+
+const LOGO_WIDTHS = [109, 111, 78, 111, 111, 113];
 
 export class PixelFont {
   constructor(image) {
     this.image = image;
-    this.cache = new Map();
   }
 
   charIndex(ch) {
     if (ch === " ") return -1;
     const idx = CHARS.indexOf(ch);
     return idx >= 0 ? idx : CHARS.indexOf("?");
-  }
-
-  measureText(text) {
-    return text.length * GLYPH_W;
   }
 
   drawText(ctx, text, x, y, align = "left") {
@@ -28,9 +24,7 @@ export class PixelFont {
 
     let cx = startX;
     for (const ch of text) {
-      if (ch !== " ") {
-        this.drawChar(ctx, ch, cx, y);
-      }
+      if (ch !== " ") this.drawChar(ctx, ch, cx, y);
       cx += GLYPH_W;
     }
   }
@@ -46,7 +40,7 @@ export class PixelFont {
   }
 }
 
-export const CURSOR_GLYPH = 29; // '>'
+export const CURSOR_GLYPH = 29;
 
 export const LOGO_FRAME_H = 20;
 export const LOGO_FRAME_COUNT = 6;
@@ -54,11 +48,12 @@ export const TEXT_STAGE_Y = 122;
 export const TEXT_CONGRATS_Y = 137;
 
 export function drawLogoFrame(ctx, sheet, frame, x, y) {
-  const clamped = Math.max(0, Math.min(frame, LOGO_FRAME_COUNT - 1));
-  const sy = clamped * LOGO_FRAME_H;
-  ctx.drawImage(sheet, 0, sy, 213, LOGO_FRAME_H, x - 106, y - 10, 213, LOGO_FRAME_H);
+  const f = Math.max(0, Math.min(frame, LOGO_FRAME_COUNT - 1));
+  const sy = f * LOGO_FRAME_H;
+  const w = LOGO_WIDTHS[f];
+  ctx.drawImage(sheet, 0, sy, w, LOGO_FRAME_H, x - w / 2, y - LOGO_FRAME_H / 2, w, LOGO_FRAME_H);
 }
 
-export function drawTextBanner(ctx, sheet, sy, x, y, w = 213, h = 20) {
+export function drawTextBanner(ctx, sheet, sy, x, y, w = 90, h = 18) {
   ctx.drawImage(sheet, 0, sy, w, h, x - w / 2, y - h / 2, w, h);
 }

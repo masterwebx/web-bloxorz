@@ -20,6 +20,7 @@ export class MenuScene {
     this.frame = 0;
     this.logoFrame = 0;
     this.bgAlpha = 0.25;
+    this.showCursor = false;
 
     this.blockPos = { x: 17, y: 7 };
     this.blockPlayer = new AnimationPlayer();
@@ -53,33 +54,21 @@ export class MenuScene {
       return null;
     }
 
-    if (this.state === "tutorial") {
-      return this.updateTutorial();
-    }
-
     this.frame++;
-    this.logoFrame = Math.floor(this.frame / 15) % 6;
+    this.logoFrame = Math.min(4, Math.floor(this.frame / 15));
 
-    // Pulsing bg fade like the GBA menu
     const pulse = this.frame % 300;
     this.bgAlpha = pulse >= 150
-      ? 0.25 + (pulse - 150) / 150 * 0.75
+      ? 0.25 + ((pulse - 150) / 150) * 0.75
       : 0.25 + (1 - pulse / 150) * 0.75;
 
     this.updateBlockAnimation();
 
     if (this.invalidCodeTimer > 0) this.invalidCodeTimer--;
 
-    if (this.screen === "main") {
-      return this.updateMainMenu();
-    }
-    if (this.screen === "load") {
-      return this.updateLoadStage();
-    }
-    if (this.screen === "credits") {
-      return this.updateCredits();
-    }
-
+    if (this.screen === "main") return this.updateMainMenu();
+    if (this.screen === "load") return this.updateLoadStage();
+    if (this.screen === "credits") return this.updateCredits();
     return null;
   }
 
@@ -106,11 +95,13 @@ export class MenuScene {
         this.enteredCode = 0;
         this.selectedDigit = 0;
         this.logoYOffset = -12;
+        this.showCursor = false;
         return null;
       }
       if (this.selectedItem === 2) {
         this.screen = "credits";
         this.logoYOffset = -24;
+        this.showCursor = false;
         return null;
       }
     }
@@ -127,12 +118,12 @@ export class MenuScene {
       this.keys["ArrowRight"] = false;
       this.audio.play("hover");
     } else if (this.keys["ArrowUp"]) {
-      const digit = Math.floor(this.enteredCode / Math.pow(10, 5 - this.selectedDigit)) % 10;
+      const digit = Math.floor(this.enteredCode / 10 ** (5 - this.selectedDigit)) % 10;
       this.enteredCode = this.setDigit(this.enteredCode, this.selectedDigit, (digit + 1) % 10);
       this.keys["ArrowUp"] = false;
       this.audio.play("hover");
     } else if (this.keys["ArrowDown"]) {
-      const digit = Math.floor(this.enteredCode / Math.pow(10, 5 - this.selectedDigit)) % 10;
+      const digit = Math.floor(this.enteredCode / 10 ** (5 - this.selectedDigit)) % 10;
       this.enteredCode = this.setDigit(this.enteredCode, this.selectedDigit, (digit + 9) % 10);
       this.keys["ArrowDown"] = false;
       this.audio.play("hover");
@@ -151,15 +142,16 @@ export class MenuScene {
       this.keys["Escape"] = false;
       this.screen = "main";
       this.logoYOffset = 0;
+      this.showCursor = true;
       this.audio.play("click");
     }
     return null;
   }
 
   setDigit(num, pos, digit) {
-    const factor = Math.pow(10, 5 - pos);
+    const factor = 10 ** (5 - pos);
     const before = Math.floor(num / (factor * 10));
-    const after = num % Math.pow(10, 5 - pos);
+    const after = num % factor;
     return before * factor * 10 + digit * factor + after;
   }
 
@@ -170,42 +162,50 @@ export class MenuScene {
       this.keys["Space"] = false;
       this.screen = "main";
       this.logoYOffset = 0;
+      this.showCursor = true;
       this.audio.play("click");
-    }
-    return null;
-  }
-
-  updateTutorial() {
-    if (this.keys["Escape"]) {
-      this.startLevel = 0;
-      this.keys["Escape"] = false;
-      return "level";
     }
     return null;
   }
 
   updateBlockAnimation() {
     const moveFrames = this.blockPlayer.frameTime * 8;
-    const cycle = moveFrames * 6;
-    const f = this.frame % cycle;
 
-    if (f === 0) this.blockPlayer.setAnimation(ANIM.BLOCK_UP_MOVE_LEFT);
-    else if (f === moveFrames - 1) {
+    if (this.frame === 0) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_UP_MOVE_LEFT);
+    } else if (this.frame === moveFrames - 1) {
       this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
       this.blockPos.x -= 2;
-    } else if (f === moveFrames) this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_FORWARD);
-    else if (f === moveFrames * 2 - 1) {
+    } else if (this.frame === moveFrames) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_FORWARD);
+    } else if (this.frame === moveFrames * 2 - 1) {
       this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
       this.blockPos.y -= 1;
-    } else if (f === moveFrames * 2) this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_LEFT);
-    else if (f === moveFrames * 3 - 1) {
+    } else if (this.frame === moveFrames * 2) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_LEFT);
+    } else if (this.frame === moveFrames * 3 - 1) {
       this.blockPlayer.setAnimation(ANIM.BLOCK_UP);
       this.blockPos.x -= 1;
+    } else if (this.frame === moveFrames * 3) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_UP_MOVE_LEFT);
+    } else if (this.frame === moveFrames * 4 - 1) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
+      this.blockPos.x -= 2;
+    } else if (this.frame === moveFrames * 4) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_FORWARD);
+    } else if (this.frame === moveFrames * 5 - 1) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
+      this.blockPos.y -= 1;
+    } else if (this.frame === moveFrames * 5) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_LEFT);
+    } else if (this.frame === moveFrames * 6 - 1) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_UP);
+      this.blockPos.x -= 1;
+      this.showCursor = true;
+    } else if (this.frame === moveFrames * 6 + 3) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_SPIN_BACK);
     }
 
-    if (f < moveFrames * 4) {
-      this.blockPlayer.playUntilDone();
-    }
     this.blockPlayer.update();
 
     const screen = blockTileToScreenPos(this.blockPos);
@@ -229,12 +229,12 @@ export class MenuScene {
     this.renderer.drawAnimatedLogo(
       this.logoFrame,
       58,
-      90 - this.logoFrame * 20 + this.logoYOffset
+      80 + 10 - this.logoFrame * 20 + this.logoYOffset
     );
     this.renderer.drawBlock(this.blockPlayer);
 
     if (this.screen === "main") {
-      this.renderer.drawMenuText(MENU_ITEMS, this.selectedItem, this.logoYOffset);
+      this.renderer.drawMenuText(MENU_ITEMS, this.selectedItem, this.logoYOffset, this.showCursor);
     } else if (this.screen === "load") {
       this.renderer.drawPasscode(this.enteredCode, this.selectedDigit, this.invalidCodeTimer);
     } else if (this.screen === "credits") {
