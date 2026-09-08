@@ -1405,6 +1405,7 @@ async function boot(): Promise<void> {
   await Promise.all([
     document.fonts.load("700 15px Orbitron"),
     document.fonts.load("500 13px Orbitron"),
+    document.fonts.load("500 12px Orbitron"),
   ]).catch(() => undefined);
   const assets = await loadAssets();
   renderer = new Renderer(canvas, assets);

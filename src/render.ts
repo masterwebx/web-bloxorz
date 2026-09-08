@@ -540,16 +540,34 @@ export class Renderer {
 
   drawHud(code: string, moves: number, tab = "Menu"): void {
     this.drawMenuTab(tab);
-    this.drawGlowBlob(468, 22, 100, 28, 0.6);
-    this.drawUiText("Passcode:", 398, 18, { size: 11, color: "#140c08" });
-    this.drawUiText(code, 478, 18, { size: 11, color: "#140c08" });
-    this.drawUiText("Moves:", 422, 36, { size: 11, color: "#140c08" });
-    this.drawUiText(String(moves).padStart(6, "0"), 478, 36, { size: 11, color: "#140c08" });
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = `500 12px ${UI_FONT}`;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "alphabetic";
+    ctx.shadowColor = "rgba(255, 150, 50, 0.9)";
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.fillStyle = "#1a0c06";
+    ctx.fillText(`Passcode: ${code}`, 536, 18);
+    ctx.fillText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36);
+    ctx.restore();
   }
 
   drawMenuTab(label = "Menu"): void {
-    this.drawGlowBlob(label.length > 8 ? 78 : 36, 14, label.length > 8 ? 78 : 38, 16, 0.7);
-    this.drawUiText(label, 14, 20, { size: 13, color: "#140c08" });
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = `500 13px ${UI_FONT}`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.shadowColor = "rgba(255, 150, 50, 0.95)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.fillStyle = "#1a0c06";
+    ctx.fillText(label, 14, 20);
+    ctx.restore();
   }
 
   hitMenuTab(mx: number, my: number, wide = false): boolean {
