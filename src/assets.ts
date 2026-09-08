@@ -16,6 +16,10 @@ export interface Assets {
     fragile: HTMLImageElement;
     split: HTMLImageElement;
   };
+  bridges: {
+    l: HTMLImageElement[];
+    r: HTMLImageElement[];
+  };
   ui: {
     menuBg: HTMLImageElement;
     levelBg: HTMLImageElement;
@@ -156,12 +160,20 @@ export async function loadAssets(): Promise<Assets> {
     ...[116, 118, 120, 122, 124, 126, 128, 130].map((id) =>
       loadImage(assetUrl(`assets/block/${id}.png`)),
     ),
+    ...[275, 277, 279, 281, 283, 286, 288, 290].map((id) =>
+      loadImage(assetUrl(`assets/bridges/${id}.png`)),
+    ),
+    ...[300, 302, 304, 306, 308, 310, 312, 314].map((id) =>
+      loadImage(assetUrl(`assets/bridges/${id}.png`)),
+    ),
   ]);
 
   const logo = rest.slice(0, 6);
   const tutorial = rest.slice(6, 15);
   const tutorialText = rest.slice(15, 24);
   const spin = [up, ...rest.slice(24, 32)];
+  const bridgeL = rest.slice(32, 40);
+  const bridgeR = rest.slice(40, 48);
 
   return {
     tiles: { stone, end, soft, heavy, fragile, split },
@@ -195,5 +207,6 @@ export async function loadAssets(): Promise<Assets> {
     tutorial,
     tutorialText,
     block: { up, forward, right, cube, spin },
+    bridges: { l: bridgeL, r: bridgeR },
   };
 }

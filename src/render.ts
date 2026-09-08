@@ -20,12 +20,13 @@ const SZ = 23;
 const GROUND = 0.04;
 const TILE_OX = -2;
 const TILE_OY = -6;
-const HUD_DIGIT_W = 201 / 10;
-const HUD_DIGIT_H = 23;
 const MENU_X = 42;
-export const MENU_Y = 168;
-export const MENU_GAP = 26;
-export const MENU_COUNT = 5;
+export const MENU_Y = 148;
+export const MENU_GAP = 22;
+export const MENU_COUNT = 7;
+export const PAUSE_COUNT = 4;
+const SETTINGS_Y = 152;
+const SETTINGS_GAP = 17;
 const UI_FONT = "Orbitron, sans-serif";
 /** 329.png is ordered 1–9, then 0. Values are [sx0, sx1]. */
 const STAGE_DIGIT_RUNS: [number, number][] = [
@@ -302,17 +303,17 @@ export class Renderer {
         if (tile === "bridgeL" || tile === "bridgeR") {
           const b = stage.bridgeAt(x, y)!;
           const vis = b.frame / 7;
-          if (vis <= 0.02) {
-            this.ctx.restore();
-            continue;
+          const fade = Math.min(1, t * 1.4) * (1 - scatter * 0.92);
+          this.ctx.globalAlpha = fade;
+          this.drawBridgeBed(x, y, 1 - vis);
+          if (vis > 0.02) {
+            this.ctx.globalAlpha = fade * Math.min(1, vis * 1.15);
+            this.ctx.drawImage(this.assets.tiles.stone, drawX, drawY + (1 - vis) * 9);
           }
-          this.ctx.globalAlpha = Math.min(1, t * 1.4) * Math.min(1, vis) * (1 - scatter * 0.92);
-          const rise = (1 - vis) * 10;
-          this.ctx.drawImage(this.assets.tiles.stone, drawX, drawY + rise);
           if (b.flash > 0) {
-            this.ctx.globalAlpha = Math.min(0.7, b.flash * 2) * Math.min(1, t * 1.4) * (1 - scatter);
+            this.ctx.globalAlpha = Math.min(0.7, b.flash * 2) * fade;
             this.ctx.fillStyle = b.flashOn ? "rgba(70,255,90,0.7)" : "rgba(255,50,40,0.7)";
-            this.ctx.translate(-this.cam.x - p.x - TILE_OX, -this.cam.y - p.y - TILE_OY);
+            this.ctx.translate(-25 - TILE_OX, -17 - TILE_OY);
             this.drawTileOverlay(x, y);
           }
           this.ctx.restore();
@@ -331,6 +332,48 @@ export class Renderer {
     if (intro >= 1 && scatter < 0.08) {
       for (const it of this.blockDrawables(stage)) it.draw();
     }
+  }
+
+  private drawBridgeBed(x: number, y: number, lowered: number): void {
+    const z0 = -0.08 - lowered * 0.42;
+    const h = 0.3;
+    const inset = 0.03;
+    const origin = project(x, y, 0);
+    const loc = (gx: number, gy: number, gz: number) => {
+      const q = project(gx, gy, gz);
+      return { x: q.x - origin.x - TILE_OX - 25, y: q.y - origin.y - TILE_OY - 17 };
+    };
+    const tpts = [
+      loc(x + inset, y + inset, z0 + h),
+      loc(x + 1 - inset, y + inset, z0 + h),
+      loc(x + 1 - inset, y + 1 - inset, z0 + h),
+      loc(x + inset, y + 1 - inset, z0 + h),
+    ];
+    const bpts = [
+      loc(x + inset, y + inset, z0),
+      loc(x + 1 - inset, y + inset, z0),
+      loc(x + 1 - inset, y + 1 - inset, z0),
+      loc(x + inset, y + 1 - inset, z0),
+    ];
+    const ctx = this.ctx;
+    const fillPoly = (pts: { x: number; y: number }[], color: string) => {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    fillPoly([tpts[1], tpts[2], bpts[2], bpts[1]], "#3a2a22");
+    fillPoly([tpts[2], tpts[3], bpts[3], bpts[2]], "#2a201c");
+    fillPoly(tpts, `rgb(${72 + lowered * 18}, ${46 + lowered * 8}, ${34})`);
+    ctx.strokeStyle = "rgba(18,10,8,0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(tpts[0].x, tpts[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(tpts[i].x, tpts[i].y);
+    ctx.closePath();
+    ctx.stroke();
   }
 
   private drawTileOverlay(x: number, y: number): void {
@@ -508,22 +551,23 @@ export class Renderer {
     const cells = cube ? [{ x: state.x, y: state.y }] : occupied(state);
     const ctx = this.ctx;
     ctx.save();
-    ctx.fillStyle = `rgba(6, 2, 0, ${alpha})`;
-    const ox = 10;
-    const oy = 5;
+    ctx.globalCompositeOperation = "multiply";
+    ctx.filter = "blur(6px)";
     for (const c of cells) {
       const pts = [
-        project(c.x, c.y, 0.01),
-        project(c.x + 1, c.y, 0.01),
-        project(c.x + 1, c.y + 1, 0.01),
-        project(c.x, c.y + 1, 0.01),
+        project(c.x + 0.1, c.y + 0.1, 0.02),
+        project(c.x + 0.9, c.y + 0.1, 0.02),
+        project(c.x + 0.9, c.y + 0.9, 0.02),
+        project(c.x + 0.1, c.y + 0.9, 0.02),
       ];
       ctx.beginPath();
-      ctx.moveTo(this.cam.x + pts[0].x + ox, this.cam.y + pts[0].y + oy);
-      for (let i = 1; i < 4; i++) ctx.lineTo(this.cam.x + pts[i].x + ox, this.cam.y + pts[i].y + oy);
+      ctx.moveTo(this.cam.x + pts[0].x + 2, this.cam.y + pts[0].y + 1);
+      for (let i = 1; i < 4; i++) ctx.lineTo(this.cam.x + pts[i].x + 2, this.cam.y + pts[i].y + 1);
       ctx.closePath();
+      ctx.fillStyle = `rgba(48, 22, 14, ${Math.min(1, alpha * 0.82)})`;
       ctx.fill();
     }
+    ctx.filter = "none";
     ctx.restore();
   }
 
@@ -555,6 +599,7 @@ export class Renderer {
       size?: number;
       color?: string;
       glow?: boolean;
+      glowBlur?: number;
       align?: CanvasTextAlign;
       weight?: string;
     } = {},
@@ -565,65 +610,35 @@ export class Renderer {
     ctx.textAlign = opts.align ?? "left";
     ctx.textBaseline = "alphabetic";
     if (opts.glow) {
-      ctx.shadowColor = "rgba(210, 72, 16, 0.95)";
-      ctx.shadowBlur = 7;
-      ctx.fillStyle = "#ffc080";
+      ctx.shadowColor = "rgba(160, 48, 8, 0.95)";
+      ctx.shadowBlur = opts.glowBlur ?? 10;
+      ctx.fillStyle = opts.color ?? "#140c08";
       ctx.fillText(text, x, y);
-      ctx.shadowBlur = 0;
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = "rgba(255, 120, 30, 0.45)";
+      ctx.fillText(text, x, y);
     }
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
     ctx.fillStyle = opts.color ?? "#ffffff";
     ctx.fillText(text, x, y);
     ctx.restore();
   }
 
   drawHud(code: string, moves: number): void {
-    const ctx = this.ctx;
-    ctx.save();
     this.drawMenuTab();
-    const sample = ctx.getImageData(508, 10, 1, 1).data;
-    ctx.fillStyle = `rgb(${sample[0]},${sample[1]},${sample[2]})`;
-    ctx.fillRect(392, 4, 158, 40);
-    this.drawUiText("Passcode:", 398, 18, { size: 11, color: "#140c08", weight: "700" });
-    this.drawUiText(code, 478, 18, { size: 11, color: "#140c08", weight: "700" });
-    this.drawUiText("Moves:", 422, 36, { size: 11, color: "#140c08", weight: "700" });
-    this.drawUiText(String(moves).padStart(6, "0"), 478, 36, { size: 11, color: "#140c08", weight: "700" });
-    ctx.restore();
+    this.drawUiText("Passcode:", 398, 18, { size: 11, color: "#140c08", glow: true, glowBlur: 12 });
+    this.drawUiText(code, 478, 18, { size: 11, color: "#140c08" });
+    this.drawUiText("Moves:", 422, 36, { size: 11, color: "#140c08", glow: true, glowBlur: 12 });
+    this.drawUiText(String(moves).padStart(6, "0"), 478, 36, { size: 11, color: "#140c08" });
   }
 
   drawMenuTab(): void {
-    const ctx = this.ctx;
-    const x = 8;
-    const y = 8;
-    const w = 62;
-    const h = 18;
-    const g = ctx.createLinearGradient(x, y, x, y + h);
-    g.addColorStop(0, "#e8b060");
-    g.addColorStop(0.5, "#c07830");
-    g.addColorStop(1, "#8a4014");
-    ctx.fillStyle = g;
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = "rgba(40, 16, 4, 0.5)";
-    ctx.strokeRect(x + 0.5, y + 0.5, w, h);
-    this.drawUiText("Menu", x + 31, y + 14, { size: 11, color: "#140c08", align: "center", weight: "700" });
+    this.drawUiText("Menu", 14, 20, { size: 13, color: "#140c08", glow: true, glowBlur: 16 });
   }
 
   hitMenuTab(mx: number, my: number): boolean {
     return mx >= 8 && mx <= 70 && my >= 8 && my <= 26;
-  }
-
-  private drawSpriteDigits(
-    sheet: HTMLImageElement,
-    text: string,
-    x: number,
-    y: number,
-    dw = HUD_DIGIT_W,
-    dh = HUD_DIGIT_H,
-  ): void {
-    for (let i = 0; i < text.length; i++) {
-      const n = text.charCodeAt(i) - 48;
-      if (n < 0 || n > 9) continue;
-      this.ctx.drawImage(sheet, n * HUD_DIGIT_W, 0, HUD_DIGIT_W, HUD_DIGIT_H, x + i * dw, y, dw, dh);
-    }
   }
 
   drawDigit(digit: number, x: number, y: number, scale = 1): void {
@@ -662,20 +677,27 @@ export class Renderer {
   drawMenuButtons(
     selected: number,
     originY: number,
-    hover: number | null,
+    _hover: number | null,
     muted: boolean,
     canResume: boolean,
   ): void {
-    const labels = ["Start New Game", "Resume Game", "Load Stage", "Toggle Sound", "Credits"];
+    const labels = [
+      "Start New Game",
+      "Resume Game",
+      "Load Stage",
+      "Stage Creator",
+      "Settings",
+      "Toggle Sound",
+      "Credits",
+    ];
     labels.forEach((label, i) => {
       const y = originY + i * MENU_GAP;
-      const active = i === selected || i === hover;
       const dim = i === 1 && !canResume;
       this.ctx.save();
       this.ctx.globalAlpha = dim ? 0.32 : 1;
-      if (active && !dim) this.drawUiText(">", MENU_X - 16, y + 16, { size: 15, glow: true });
-      this.drawUiText(label, MENU_X + 4, y + 16, { size: 15, glow: true });
-      if (i === 3) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 15, glow: true });
+      if (i === selected && !dim) this.drawUiText(">", MENU_X - 16, y + 16, { size: 14, glow: true });
+      this.drawUiText(label, MENU_X + 4, y + 16, { size: 14, glow: true });
+      if (i === 5) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 14, glow: true });
       this.ctx.restore();
     });
   }
@@ -711,9 +733,12 @@ export class Renderer {
     ctx.strokeStyle = "rgba(255,180,100,0.4)";
     ctx.strokeRect(90.5, 140.5, 370, 130);
     ctx.fillStyle = "#fff4d6";
-    ctx.font = "16px Trebuchet MS, Verdana, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Would you like to view the instructions?", STAGE_W / 2, 178);
+    this.drawUiText("Would you like to view the instructions?", STAGE_W / 2, 178, {
+      size: 14,
+      glow: true,
+      align: "center",
+      color: "#fff4d6",
+    });
     const opts = ["Yes", "No"];
     opts.forEach((label, i) => {
       const y = 214 + i * 26;
@@ -793,30 +818,17 @@ export class Renderer {
   drawLoad(code: string, cursor: number, invalid: boolean): void {
     const ctx = this.ctx;
     ctx.save();
-    const label = this.assets.ui.typePasscode;
-    ctx.drawImage(this.knocked(label), (STAGE_W - label.width) / 2, 198);
-    const dw = 18;
-    const dh = 20;
+    this.drawUiText("Type the passcode", STAGE_W / 2, 210, { size: 16, glow: true, align: "center" });
+    const dw = 22;
     const startX = STAGE_W / 2 - (6 * dw) / 2;
     const digits = code.padEnd(6, " ").split("");
     digits.forEach((ch, i) => {
       const x = startX + i * dw;
-      if (ch !== " ") this.drawSpriteDigits(this.assets.ui.loadDigits, ch, x, 228, dw, dh);
-      else {
-        ctx.fillStyle = "#fff4d6";
-        ctx.font = "22px Courier New, monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("_", x + dw / 2, 248);
-      }
-      if (i === cursor) {
-        ctx.fillStyle = "#ffb060";
-        ctx.font = "14px Trebuchet MS, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("^", x + dw / 2, 270);
-      }
+      this.drawUiText(ch === " " ? "_" : ch, x + dw / 2, 248, { size: 22, glow: true, align: "center" });
+      if (i === cursor) this.drawUiText("^", x + dw / 2, 270, { size: 14, glow: true, align: "center" });
     });
-    ctx.drawImage(this.knocked(this.assets.ui.enter), STAGE_W / 2 - 40, 286);
-    ctx.drawImage(this.knocked(this.assets.ui.backMenu), 24, STAGE_H - 36);
+    this.drawUiText("Enter", STAGE_W / 2, 304, { size: 14, glow: true, align: "center" });
+    this.drawUiText("Back", 36, STAGE_H - 18, { size: 13, glow: true });
     if (invalid) this.drawUiText("INVALID CODE", STAGE_W / 2, 338, { size: 14, glow: true, align: "center", color: "#ff6a55" });
     ctx.restore();
   }
@@ -826,14 +838,20 @@ export class Renderer {
     ctx.save();
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
-    const text = this.assets.tutorialText[slide];
+    const lines = TUTORIAL[slide] ?? [];
+    lines.forEach((line, i) => {
+      this.drawUiText(line, 22, 36 + offsetY + i * 20, {
+        size: i === 0 ? 15 : 12,
+        glow: true,
+        weight: i === 0 ? "700" : "500",
+        color: "#fff4d6",
+      });
+    });
     const art = this.assets.tutorial[slide];
-    ctx.drawImage(text, 8, 8 + offsetY, 360, 168);
     ctx.drawImage(art, 360, 18 + offsetY, 175, 171);
-    ctx.drawImage(this.assets.ui.prev, 24, STAGE_H - 40);
-    if (slide < 8) ctx.drawImage(this.assets.ui.next, STAGE_W - 150, STAGE_H - 40);
-    else ctx.drawImage(this.assets.ui.start, STAGE_W - 150, STAGE_H - 40);
-    ctx.drawImage(this.assets.ui.skip, STAGE_W - 190, 8);
+    this.drawUiText("Skip", STAGE_W - 70, 24, { size: 13, glow: true, align: "right" });
+    this.drawUiText("Back", 40, STAGE_H - 18, { size: 13, glow: true });
+    this.drawUiText(slide < 8 ? "Next" : "Start", STAGE_W - 40, STAGE_H - 18, { size: 13, glow: true, align: "right" });
     ctx.restore();
   }
 
@@ -845,36 +863,44 @@ export class Renderer {
     return null;
   }
 
-  drawPause(selected: number, time: string, stage: number, attempts: number, muted: boolean): void {
+  drawPause(
+    selected: number,
+    time: string,
+    stage: number,
+    attempts: number,
+    muted: boolean,
+    slide: number,
+  ): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.fillStyle = `rgba(0,0,0,${0.28 * slide})`;
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
     this.drawMenuTab();
+    const e = 1 - Math.pow(1 - Math.min(1, slide), 3);
+    const leftX = -240 + (28 + 240) * e;
+    const rightX = 560 + (300 - 560) * e;
     ctx.fillStyle = "#000";
-    ctx.fillRect(28, 138, 236, 128);
-    ctx.fillRect(300, 154, 220, 100);
-    const opts = ["Return to Game", "Toggle Sound", "Quit to Menu"];
+    ctx.fillRect(leftX, 128, 236, 168);
+    ctx.fillRect(rightX, 154, 220, 100);
+    const opts = ["Return to Game", "Restart Level", "Toggle Sound", "Quit to Menu"];
     opts.forEach((label, i) => {
-      const y = 178 + i * 32;
-      const active = i === selected;
-      if (active) this.drawUiText(">", 36, y, { size: 15, glow: true });
-      this.drawUiText(label, 56, y, { size: 15, glow: true });
-      if (i === 1) this.drawUiText(muted ? "Off" : "On", 210, y, { size: 15, glow: true });
+      const y = 158 + i * 32;
+      if (i === selected) this.drawUiText(">", leftX + 8, y, { size: 14, glow: true });
+      this.drawUiText(label, leftX + 28, y, { size: 14, glow: true });
+      if (i === 2) this.drawUiText(muted ? "Off" : "On", leftX + 182, y, { size: 14, glow: true });
     });
-    this.drawUiText("Time:", 318, 186, { size: 14, glow: true });
-    this.drawUiText("Stage:", 318, 210, { size: 14, glow: true });
-    this.drawUiText("Attempts:", 318, 234, { size: 14, glow: true });
-    this.drawUiText(time, 504, 186, { size: 14, glow: true, align: "right" });
-    this.drawUiText(String(stage + 1).padStart(2, "0"), 504, 210, { size: 14, glow: true, align: "right" });
-    this.drawUiText(String(attempts), 504, 234, { size: 14, glow: true, align: "right" });
+    this.drawUiText("Time:", rightX + 18, 186, { size: 14, glow: true });
+    this.drawUiText("Stage:", rightX + 18, 210, { size: 14, glow: true });
+    this.drawUiText("Attempts:", rightX + 18, 234, { size: 14, glow: true });
+    this.drawUiText(time, rightX + 204, 186, { size: 14, glow: true, align: "right" });
+    this.drawUiText(String(stage + 1).padStart(2, "0"), rightX + 204, 210, { size: 14, glow: true, align: "right" });
+    this.drawUiText(String(attempts), rightX + 204, 234, { size: 14, glow: true, align: "right" });
     ctx.restore();
   }
 
   drawComplete(moves: number, time: string, fails: number): void {
-    const ctx = this.ctx;
     this.drawBg("menu");
-    ctx.drawImage(this.assets.ui.congrats, 24, 70, 501, 43);
+    this.drawUiText("Congratulations", STAGE_W / 2, 92, { size: 22, glow: true, align: "center" });
     this.drawUiText("You completed the 33 stages of Bloxorz!", STAGE_W / 2, 150, { size: 14, glow: true, align: "center" });
     this.drawUiText("Moves Taken:", STAGE_W / 2 + 20, 200, { size: 14, glow: true, align: "right" });
     this.drawUiText("Time Taken:", STAGE_W / 2 + 20, 224, { size: 14, glow: true, align: "right" });
@@ -887,6 +913,167 @@ export class Renderer {
 
   menuHitLogoArea(): void {
     /* layout helper kept for hit testing in main */
+  }
+
+  hitPause(mx: number, my: number): number | null {
+    if (mx < 28 || mx > 264 || my < 142 || my > 286) return null;
+    return Math.max(0, Math.min(3, Math.floor((my - 142) / 32)));
+  }
+
+  drawSettingsPanel(
+    rows: { label: string; value: string }[],
+    selected: number,
+    listen: string | null,
+  ): void {
+    this.drawUiText("Settings", 42, 130, { size: 18, glow: true });
+    rows.forEach((row, i) => {
+      const y = SETTINGS_Y + i * SETTINGS_GAP;
+      if (i === selected) this.drawUiText(">", 28, y, { size: 13, glow: true });
+      this.drawUiText(row.label, 48, y, { size: 13, glow: true });
+      this.drawUiText(row.value, 520, y, { size: 13, glow: true, align: "right" });
+    });
+    this.drawUiText(listen ?? "Left / Right change values. Enter rebinds. Esc back.", 42, 380, {
+      size: 11,
+      glow: true,
+      weight: "500",
+    });
+  }
+
+  drawCreatorHub(selected: number): void {
+    this.drawUiText("Stage Creator", 42, 140, { size: 18, glow: true });
+    ["Create", "Play", "Back"].forEach((label, i) => {
+      const y = 180 + i * 28;
+      if (i === selected) this.drawUiText(">", 28, y, { size: 15, glow: true });
+      this.drawUiText(label, 48, y, { size: 15, glow: true });
+    });
+  }
+
+  drawEditor(
+    cells: string[],
+    spawn: [number, number],
+    tool: string,
+    tools: string[],
+    hint: string,
+  ): void {
+    this.drawUiText("Create Stage", 16, 22, { size: 14, glow: true });
+    this.drawUiText("Test", 430, 22, { size: 13, glow: true });
+    this.drawUiText("Back", 510, 22, { size: 13, glow: true });
+    const ox = 36;
+    const oy = 40;
+    const cs = 24;
+    for (let y = 0; y < 10; y++) {
+      for (let x = 0; x < 15; x++) {
+        const ch = cells[y][x] ?? " ";
+        const px = ox + x * cs;
+        const py = oy + y * cs;
+        this.ctx.fillStyle = editorColor(ch);
+        this.ctx.fillRect(px, py, cs - 1, cs - 1);
+        if (spawn[0] === x && spawn[1] === y) {
+          this.ctx.strokeStyle = "#ffcc66";
+          this.ctx.strokeRect(px + 1, py + 1, cs - 3, cs - 3);
+        }
+      }
+    }
+    tools.forEach((t, i) => {
+      const x = 410;
+      const y = 48 + i * 22;
+      if (t === tool) this.drawUiText(">", x - 14, y, { size: 12, glow: true });
+      this.drawUiText(t, x, y, { size: 12, glow: true });
+    });
+    this.drawUiText(hint, 16, 390, { size: 11, glow: true, weight: "500" });
+  }
+
+  hitEditorCell(mx: number, my: number): { x: number; y: number } | null {
+    const x = Math.floor((mx - 36) / 24);
+    const y = Math.floor((my - 40) / 24);
+    if (x < 0 || x >= 15 || y < 0 || y >= 10) return null;
+    return { x, y };
+  }
+
+  hitEditorTool(mx: number, my: number, count: number): number | null {
+    if (mx < 396 || mx > 540) return null;
+    const i = Math.floor((my - 34) / 22);
+    if (i < 0 || i >= count) return null;
+    return i;
+  }
+
+  hitEditorHeader(mx: number, my: number): "test" | "back" | null {
+    if (my > 30) return null;
+    if (mx >= 400 && mx < 480) return "test";
+    if (mx >= 490) return "back";
+    return null;
+  }
+
+  hitSettings(mx: number, my: number, count: number): { row: number; side: "left" | "right" } | null {
+    if (mx < 24 || mx > 530) return null;
+    const i = Math.floor((my - (SETTINGS_Y - 12)) / SETTINGS_GAP);
+    if (i < 0 || i >= count) return null;
+    return { row: i, side: mx > 360 ? "right" : "left" };
+  }
+
+  hitCreatorHub(mx: number, my: number): number | null {
+    if (mx < 24 || mx > 280) return null;
+    const i = Math.floor((my - 162) / 28);
+    if (i < 0 || i > 2) return null;
+    return i;
+  }
+
+  hitSavePrompt(_mx: number, my: number): number | null {
+    if (my >= 214 && my <= 240) return 0;
+    if (my >= 244 && my <= 270) return 1;
+    return null;
+  }
+
+  drawCustomPlay(names: string[], selected: number, paste: string, msg: string): void {
+    this.drawUiText("Play Custom Stages", 42, 130, { size: 18, glow: true });
+    if (!names.length) this.drawUiText("No saved stages yet.", 48, 168, { size: 13, glow: true });
+    names.slice(0, 7).forEach((n, i) => {
+      const y = 160 + i * 22;
+      if (i === selected) this.drawUiText(">", 28, y, { size: 13, glow: true });
+      this.drawUiText(n, 48, y, { size: 13, glow: true });
+    });
+    this.drawUiText("Paste share code:", 42, 330, { size: 13, glow: true });
+    this.drawUiText(paste || "_", 48, 352, { size: 12, glow: true, weight: "500" });
+    this.drawUiText(msg, 42, 374, { size: 12, glow: true, color: "#ffb070" });
+    this.drawUiText("Enter play  Del delete  Esc back", 42, 392, { size: 11, glow: true, weight: "500" });
+  }
+
+  drawSavePrompt(code: string, msg: string): void {
+    this.drawUiText("Stage beaten — it can be saved.", 275, 160, { size: 16, glow: true, align: "center" });
+    this.drawUiText(msg, 275, 190, { size: 13, glow: true, align: "center" });
+    this.drawUiText("Save & Copy Code", 275, 230, { size: 15, glow: true, align: "center" });
+    this.drawUiText("Keep Editing", 275, 258, { size: 15, glow: true, align: "center" });
+    this.drawUiText(code.length > 48 ? `${code.slice(0, 42)}…` : code, 275, 300, {
+      size: 10,
+      glow: true,
+      align: "center",
+      weight: "500",
+      color: "#c8b8a0",
+    });
+  }
+}
+
+function editorColor(ch: string): string {
+  switch (ch) {
+    case "b":
+      return "#9aa4a8";
+    case "e":
+      return "#1a1210";
+    case "s":
+      return "#c09040";
+    case "h":
+      return "#8a6030";
+    case "f":
+      return "#d07030";
+    case "v":
+      return "#6090c0";
+    case "l":
+    case "k":
+    case "r":
+    case "q":
+      return "#6a5040";
+    default:
+      return "#221818";
   }
 }
 

@@ -12,13 +12,18 @@ Bloxorz was created by Damien Clarke / DX Interactive (21 June 2007). This is an
 
 ## How to play
 
-- **Arrow keys** or **WASD** — roll the block
+- **Arrow keys** or **WASD** — roll the block (rebind in Settings)
 - **Space** — switch which small cube you control after a split
 - **Esc** — pause
 - **R** — restart the current stage
 - **M** — mute
+- **Gamepad** — D-pad or left stick to roll, A to confirm, B to back, Start to pause, X to swap split cubes. Rumble can be toggled in Settings.
 
 Passcodes sit in the top-right of each stage. Open **Load Stage** from the menu and type a six-digit code to jump there.
+
+**Settings** (main menu) has music and SFX sliders, rumble on/off, and keyboard/gamepad remapping.
+
+**Stage Creator** lets you paint a stage, then **Test** it. You have to beat your stage before it can be saved. Saved stages get a `BX1.` share code you can copy. **Play** loads your stages or a pasted code.
 
 | Stage | Code |
 | --- | --- |

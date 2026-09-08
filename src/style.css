@@ -29,7 +29,7 @@ body {
   height: 100%;
   background: #000;
   overflow: hidden;
-  font-family: "Trebuchet MS", "Verdana", sans-serif;
+  font-family: Orbitron, sans-serif;
 }
 
 #app {
@@ -76,7 +76,8 @@ body {
   border: 1px solid rgba(255, 180, 90, 0.35);
   background: rgba(20, 8, 0, 0.55);
   color: #ffc37a;
-  font-size: 18px;
+  font-family: Orbitron, sans-serif;
+  font-size: 16px;
   border-radius: 8px;
   cursor: pointer;
 }

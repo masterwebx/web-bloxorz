@@ -4,8 +4,12 @@ export class SoundBank {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
   private ambient: AudioBufferSourceNode | null = null;
+  private sfxGain: GainNode | null = null;
+  private musicGain: GainNode | null = null;
   muted = false;
   unlocked = false;
+  sfx = 0.9;
+  music = 0.7;
 
   async load(): Promise<void> {
     const names = [
@@ -40,18 +44,25 @@ export class SoundBank {
     this.unlocked = true;
   }
 
-  play(name: string, { volume = 1, loop = false } = {}): AudioBufferSourceNode | null {
+  setMix(sfx: number, music: number): void {
+    this.sfx = sfx;
+    this.music = music;
+    this.applyGains();
+  }
+
+  play(name: string, { volume = 1, loop = false, music = false } = {}): AudioBufferSourceNode | null {
     if (this.muted || !this.unlocked) return null;
     const buffer = this.buffers.get(name);
     if (!buffer) return null;
     const ctx = this.getCtx();
+    this.ensureGains();
     const src = ctx.createBufferSource();
     const gain = ctx.createGain();
     src.buffer = buffer;
     src.loop = loop;
     gain.gain.value = volume;
     src.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(music ? this.musicGain! : this.sfxGain!);
     src.start();
     return src;
   }
@@ -64,14 +75,14 @@ export class SoundBank {
   startAmbient(): void {
     this.stopAmbient();
     if (this.muted || !this.unlocked) return;
-    const src = this.play("ambient", { volume: 0.55, loop: true });
+    const src = this.play("ambient", { volume: 0.55, loop: true, music: true });
     this.ambient = src;
   }
 
   startMenu(): void {
     this.stopAmbient();
     if (this.muted || !this.unlocked) return;
-    const src = this.play("menu", { volume: 0.7, loop: true });
+    const src = this.play("menu", { volume: 0.7, loop: true, music: true });
     this.ambient = src;
   }
 
@@ -87,7 +98,24 @@ export class SoundBank {
   toggleMute(): boolean {
     this.muted = !this.muted;
     if (this.muted) this.stopAmbient();
+    this.applyGains();
     return this.muted;
+  }
+
+  private ensureGains(): void {
+    const ctx = this.getCtx();
+    if (!this.sfxGain) {
+      this.sfxGain = ctx.createGain();
+      this.sfxGain.connect(ctx.destination);
+      this.musicGain = ctx.createGain();
+      this.musicGain.connect(ctx.destination);
+    }
+    this.applyGains();
+  }
+
+  private applyGains(): void {
+    if (this.sfxGain) this.sfxGain.gain.value = this.muted ? 0 : this.sfx;
+    if (this.musicGain) this.musicGain.gain.value = this.muted ? 0 : this.music;
   }
 
   private getCtx(): AudioContext {
