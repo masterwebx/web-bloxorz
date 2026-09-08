@@ -1,16 +1,26 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
     <title>Bloxorz</title>
-    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div id="app">
-      <canvas id="canvas"></canvas>
-      <div id="overlay"></div>
+      <div id="stage">
+        <canvas id="game" width="550" height="400"></canvas>
+        <div id="touch" class="hidden">
+          <button type="button" data-dir="left" aria-label="Left">◀</button>
+          <div class="touch-mid">
+            <button type="button" data-dir="up" aria-label="Up">▲</button>
+            <button type="button" data-act="space" aria-label="Switch block">●</button>
+            <button type="button" data-dir="down" aria-label="Down">▼</button>
+          </div>
+          <button type="button" data-dir="right" aria-label="Right">▶</button>
+        </div>
+      </div>
     </div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

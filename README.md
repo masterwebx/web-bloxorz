@@ -1,40 +1,50 @@
-# Bloxorz (Three.js)
+# Bloxorz
 
-A 3D Bloxorz clone built with **Three.js**, using the original 33-stage level data from the [GBA port](https://github.com/jacobcoughenour/bloxorz_gba).
+A browser remake of Damien Clarke's 2007 puzzle game **Bloxorz**. All 33 original stages are included, with the same passcodes, switches, bridges, split blocks, and orange tiles.
 
-Roll a rectangular block across floating platforms, hit switches to raise bridges, avoid fragile tiles, split on teleporters, and sink upright into the goal hole.
+This project reconstructs the Flash game using:
 
-## Features
+- Original tile, logo, tutorial, and UI graphics extracted from the SWF
+- Stage layouts and switch logic from [Jacob Coughenour's GBA port](https://github.com/jacobcoughenour/bloxorz_gba)
+- Canvas isometric rendering of the rolling 1×1×2 block
 
-- All 33 levels with original passcodes (`levels.json`)
-- Faithful game rules: orientations, switches, bridges, fragile tiles, split/join
-- Smooth 3D roll / fall / sink animations
-- Passcode level select from the menu
+Bloxorz was created by Damien Clarke / DX Interactive (21 June 2007). This is an unofficial fan remake.
 
-## Controls
+## How to play
 
-| Key | Action |
-|-----|--------|
-| Arrow keys | Roll the block |
-| Space | Switch between split cubes |
-| Esc | Pause input |
+- **Arrow keys** or **WASD** — roll the block
+- **Space** — switch which small cube you control after a split
+- **Esc** — pause
+- **R** — restart the current stage
+- **M** — mute
 
-## Run
+Passcodes sit in the top-right of each stage. Open **Load Stage** from the menu and type a six-digit code to jump there.
+
+| Stage | Code |
+| --- | --- |
+| 01 | 780464 |
+| 02 | 290299 |
+| 03 | 918660 |
+| 04 | 520967 |
+| 05 | 028431 |
+| 33 | 614955 |
+
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:4317
+Then open the printed local URL (port **4397**).
 
-## Stack
-
-- [Vite](https://vitejs.dev/)
-- [Three.js](https://threejs.org/)
-- Level data from `public/assets/data/levels.json`
+```bash
+npm run build
+npm run preview
+```
 
 ## Credits
 
-- Original game: Damien Clarke, DX Interactive (2007)
-- Level data: Jacob Coughenour's GBA port
+- Original game: Damien Clarke, DX Interactive, 2007
+- GBA port and reconstructed `levels.json`: Jacob Coughenour (MIT)
+- Original Flash assets remain the property of their original authors

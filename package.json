@@ -4,14 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 4317",
-    "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1 --port 4317"
+    "dev": "vite --host --port 4397",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host --port 4397"
   },
   "devDependencies": {
-    "vite": "^6.0.0"
-  },
-  "dependencies": {
-    "three": "^0.185.1"
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
   }
 }

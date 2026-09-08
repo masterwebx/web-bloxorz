@@ -1,0 +1,77 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font-family: "Trebuchet MS", "Verdana", sans-serif;
+}
+
+#app {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: #000;
+}
+
+#stage {
+  position: relative;
+  width: min(100vw, calc(100vh * 550 / 400));
+  height: min(100vh, calc(100vw * 400 / 550));
+}
+
+#game {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: auto;
+  background: #000;
+  cursor: default;
+}
+
+#touch {
+  position: absolute;
+  left: 50%;
+  bottom: 3%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 2;
+}
+
+#touch.hidden {
+  display: none;
+}
+
+#touch button {
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgba(255, 180, 90, 0.35);
+  background: rgba(20, 8, 0, 0.55);
+  color: #ffc37a;
+  font-size: 18px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.touch-mid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (pointer: coarse) {
+  #touch.hidden {
+    display: flex;
+  }
+}
