@@ -203,6 +203,7 @@ function pointerPos(ev: MouseEvent | PointerEvent): { x: number; y: number } {
 function move(dir: Dir): void {
   if (screen !== "play" || !stage || busy) return;
   if (!stage.tryMove(dir)) return;
+  input.rumble(90, 0.42, 0.62);
   busy = true;
   pendingResult = null;
 }
@@ -237,6 +238,7 @@ function handlePlayResult(): void {
 
   sessionMoves += 1;
   if (result === "win") {
+    sound.play("whoosh", { volume: 0.95 });
     input.rumble(220, 0.45, 0.4);
     stage.beginSink();
     busy = true;
@@ -286,6 +288,22 @@ function backKey(key: string): boolean {
   return matchesAction(key, "back") || key === "Escape";
 }
 
+function menuEnabled(i: number): boolean {
+  return i !== 1 || resumeAt !== null;
+}
+
+function stepMenu(dir: number): void {
+  let i = menuIndex;
+  for (let n = 0; n < MENU_COUNT; n++) {
+    i = (i + dir + MENU_COUNT) % MENU_COUNT;
+    if (menuEnabled(i)) {
+      menuIndex = i;
+      sound.play("hover");
+      return;
+    }
+  }
+}
+
 function onKey(e: KeyboardEvent): void {
   if (input.justBound) {
     input.justBound = false;
@@ -308,13 +326,9 @@ function onKey(e: KeyboardEvent): void {
   }
 
   if (screen === "menu") {
-    if (e.key === "ArrowDown") {
-      menuIndex = (menuIndex + 1) % MENU_COUNT;
-      sound.play("hover");
-    } else if (e.key === "ArrowUp") {
-      menuIndex = (menuIndex + MENU_COUNT - 1) % MENU_COUNT;
-      sound.play("hover");
-    } else if (confirmKey(e.key)) {
+    if (e.key === "ArrowDown") stepMenu(1);
+    else if (e.key === "ArrowUp") stepMenu(-1);
+    else if (confirmKey(e.key)) {
       chooseMenu(menuIndex);
     }
     return;
@@ -590,6 +604,7 @@ function tryLoad(): void {
 }
 
 function chooseMenu(i: number): void {
+  if (i === 1 && resumeAt === null) return;
   sound.play("click");
   if (i === 0) {
     tutorialSlide = 0;
@@ -877,6 +892,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (screen === "menu") {
     const hit = renderer.hitMenu(p.x, p.y, MENU_Y, MENU_COUNT);
     if (hit !== null) {
+      if (hit === 1 && resumeAt === null) return;
       menuIndex = hit;
       chooseMenu(hit);
     }
@@ -1001,7 +1017,15 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "play") {
-    if (renderer.hitMenuTab(p.x, p.y)) openPause();
+    if (renderer.hitMenuTab(p.x, p.y, playMode === "editor-test")) {
+      if (playMode === "editor-test") {
+        screen = "editor";
+        sound.play("click");
+        sound.startMenu();
+        return;
+      }
+      openPause();
+    }
   }
 });
 
@@ -1016,7 +1040,7 @@ canvas.addEventListener("pointermove", (e) => {
   else menuHover = null;
   const overUi =
     screen === "play"
-      ? renderer.hitMenuTab(p.x, p.y)
+      ? renderer.hitMenuTab(p.x, p.y, playMode === "editor-test")
       : screen !== "boot" && screen !== "author" && screen !== "title";
   canvas.style.cursor = overUi ? "pointer" : "default";
   if (paintHeld && screen === "editor") {
@@ -1067,14 +1091,8 @@ function pollPad(): void {
     return;
   }
   if (screen === "menu") {
-    if (input.justPad("down")) {
-      menuIndex = (menuIndex + 1) % MENU_COUNT;
-      sound.play("hover");
-    }
-    if (input.justPad("up")) {
-      menuIndex = (menuIndex + MENU_COUNT - 1) % MENU_COUNT;
-      sound.play("hover");
-    }
+    if (input.justPad("down")) stepMenu(1);
+    if (input.justPad("up")) stepMenu(-1);
     if (input.justPad("confirm")) chooseMenu(menuIndex);
     return;
   }
@@ -1192,11 +1210,15 @@ function update(dt: number): void {
   input.update(dt);
   pollPad();
   logoTick += dt;
-  if (logoTick > 0.12) {
+  if (logoTick > 0.1) {
     logoTick = 0;
-    if (Math.random() < 0.18) logoFrame = Math.max(0, Math.min(5, logoFrame + (Math.random() < 0.5 ? -1 : 1)));
-    else logoFrame = Math.min(5, logoFrame + (logoFrame < 5 ? 1 : 0));
-    glitchX = Math.random() < 0.12 ? (Math.random() < 0.5 ? -2 : 2) : 0;
+    const roll = Math.random();
+    if (roll < 0.14) logoFrame = 3;
+    else if (roll < 0.24) logoFrame = 4;
+    else if (roll < 0.32) logoFrame = 2;
+    else if (roll < 0.38) logoFrame = 1;
+    else logoFrame = 5;
+    glitchX = Math.random() < 0.1 ? (Math.random() < 0.5 ? -1 : 1) : 0;
   }
   spinTick += dt;
   if (spinTick > 0.09) {
@@ -1243,7 +1265,7 @@ function update(dt: number): void {
         stage.beginScatter();
         pendingResult = "scatter";
         busy = true;
-        sound.play("whoosh", { volume: 0.85 });
+        sound.play("whoosh_2", { volume: 0.85 });
       }
     }
     if (pendingResult === "scatter" && stage.scatter >= 1) {
@@ -1298,7 +1320,7 @@ function draw(): void {
         ? input.listenKind === "pad"
           ? "Press a controller button…"
           : "Press a keyboard key…"
-        : "Left / Right change values. Enter rebinds a key. Shift+Enter or click right to rebind a button.";
+        : "Shift+Enter or click right to rebind a button. Esc back.";
     renderer.drawSettingsPanel(settingsRows(), settingsIndex, listen);
     return;
   }
@@ -1361,7 +1383,11 @@ function draw(): void {
   if ((screen === "play" || screen === "pause") && stage) {
     renderer.drawBg("level");
     renderer.drawLevel(stage);
-    renderer.drawHud(stage.def.code, stage.moves);
+    renderer.drawHud(
+      stage.def.code,
+      stage.moves,
+      playMode === "editor-test" ? "Back to Editor" : "Menu",
+    );
     if (screen === "pause") {
       renderer.drawPause(
         pauseIndex,

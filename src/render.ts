@@ -28,19 +28,6 @@ export const PAUSE_COUNT = 4;
 const SETTINGS_Y = 152;
 const SETTINGS_GAP = 17;
 const UI_FONT = "Orbitron, sans-serif";
-/** 329.png is ordered 1–9, then 0. Values are [sx0, sx1]. */
-const STAGE_DIGIT_RUNS: [number, number][] = [
-  [406, 449],
-  [4, 33],
-  [34, 78],
-  [80, 125],
-  [126, 171],
-  [172, 219],
-  [220, 266],
-  [267, 311],
-  [312, 357],
-  [358, 404],
-];
 
 export function project(x: number, y: number, z: number): { x: number; y: number } {
   return {
@@ -195,8 +182,6 @@ function easeOutBack(t: number): number {
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   cam: Camera = { x: 0, y: 0 };
-  private noise: CanvasPattern;
-  private rust: CanvasPattern;
   private knockCache = new Map<HTMLImageElement, HTMLCanvasElement>();
 
   constructor(
@@ -205,21 +190,6 @@ export class Renderer {
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
-    this.noise = this.makeNoise();
-    this.rust = this.makeRust();
-  }
-
-  private makeRust(): CanvasPattern {
-    const src = this.assets.block.up;
-    const c = document.createElement("canvas");
-    c.width = 28;
-    c.height = 28;
-    const g = c.getContext("2d")!;
-    g.drawImage(src, 90, 52, 28, 28, 0, 0, 28, 28);
-    const data = g.getImageData(0, 0, 28, 28);
-    for (let i = 0; i < data.data.length; i += 4) data.data[i + 3] = 255;
-    g.putImageData(data, 0, 0);
-    return this.ctx.createPattern(c, "repeat") ?? this.noise;
   }
 
   private knocked(img: HTMLImageElement): HTMLCanvasElement {
@@ -233,29 +203,11 @@ export class Renderer {
     const data = g.getImageData(0, 0, c.width, c.height);
     const px = data.data;
     for (let i = 0; i < px.length; i += 4) {
-      if (px[i] < 12 && px[i + 1] < 12 && px[i + 2] < 12) px[i + 3] = 0;
+      if (px[i] <= 6 && px[i + 1] <= 6 && px[i + 2] <= 6) px[i + 3] = 0;
     }
     g.putImageData(data, 0, 0);
     this.knockCache.set(img, c);
     return c;
-  }
-
-  private makeNoise(): CanvasPattern {
-    const c = document.createElement("canvas");
-    c.width = 64;
-    c.height = 64;
-    const g = c.getContext("2d")!;
-    const img = g.createImageData(64, 64);
-    for (let i = 0; i < img.data.length; i += 4) {
-      const n = 70 + Math.random() * 90;
-      const rust = Math.random() > 0.72;
-      img.data[i] = rust ? 160 + Math.random() * 50 : n * 0.95;
-      img.data[i + 1] = rust ? 90 + Math.random() * 40 : n * 0.7;
-      img.data[i + 2] = rust ? 70 + Math.random() * 30 : n * 0.62;
-      img.data[i + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
-    return this.ctx.createPattern(c, "repeat")!;
   }
 
   clear(): void {
@@ -288,10 +240,12 @@ export class Renderer {
         const drift = (1 - Math.min(1, e)) * ((x - 7) * 14 + (y % 2 === 0 ? -10 : 12));
         const seed = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
         const r = seed - Math.floor(seed);
-        const s = scatter * scatter;
-        const flyX = Math.cos(r * Math.PI * 2) * s * 160;
-        const flyY = Math.sin(r * Math.PI * 2) * s * 110 - s * 30;
-        const rot = (r - 0.5) * s * 7.4;
+        const s = scatter;
+        const ang = r * Math.PI * 2 + s * Math.PI * 2.35;
+        const rad = s * (70 + (x + y) * 9 + r * 50);
+        const flyX = Math.cos(ang) * rad;
+        const flyY = Math.sin(ang) * rad * 0.62;
+        const rot = s * (Math.PI * 2.4 + r * 5.2);
         const dx = this.cam.x + p.x + TILE_OX + drift + flyX;
         const dy = this.cam.y + p.y + TILE_OY - lift + flyY;
         this.ctx.save();
@@ -302,14 +256,11 @@ export class Renderer {
         const drawY = -17;
         if (tile === "bridgeL" || tile === "bridgeR") {
           const b = stage.bridgeAt(x, y)!;
-          const vis = b.frame / 7;
           const fade = Math.min(1, t * 1.4) * (1 - scatter * 0.92);
           this.ctx.globalAlpha = fade;
-          this.drawBridgeBed(x, y, 1 - vis);
-          if (vis > 0.02) {
-            this.ctx.globalAlpha = fade * Math.min(1, vis * 1.15);
-            this.ctx.drawImage(this.assets.tiles.stone, drawX, drawY + (1 - vis) * 9);
-          }
+          const frames = b.kind === "l" ? this.assets.bridges.l : this.assets.bridges.r;
+          const fi = Math.max(0, Math.min(frames.length - 1, Math.round(b.frame)));
+          this.ctx.drawImage(this.knocked(frames[fi]), drawX - 76, drawY - 90);
           if (b.flash > 0) {
             this.ctx.globalAlpha = Math.min(0.7, b.flash * 2) * fade;
             this.ctx.fillStyle = b.flashOn ? "rgba(70,255,90,0.7)" : "rgba(255,50,40,0.7)";
@@ -332,48 +283,6 @@ export class Renderer {
     if (intro >= 1 && scatter < 0.08) {
       for (const it of this.blockDrawables(stage)) it.draw();
     }
-  }
-
-  private drawBridgeBed(x: number, y: number, lowered: number): void {
-    const z0 = -0.08 - lowered * 0.42;
-    const h = 0.3;
-    const inset = 0.03;
-    const origin = project(x, y, 0);
-    const loc = (gx: number, gy: number, gz: number) => {
-      const q = project(gx, gy, gz);
-      return { x: q.x - origin.x - TILE_OX - 25, y: q.y - origin.y - TILE_OY - 17 };
-    };
-    const tpts = [
-      loc(x + inset, y + inset, z0 + h),
-      loc(x + 1 - inset, y + inset, z0 + h),
-      loc(x + 1 - inset, y + 1 - inset, z0 + h),
-      loc(x + inset, y + 1 - inset, z0 + h),
-    ];
-    const bpts = [
-      loc(x + inset, y + inset, z0),
-      loc(x + 1 - inset, y + inset, z0),
-      loc(x + 1 - inset, y + 1 - inset, z0),
-      loc(x + inset, y + 1 - inset, z0),
-    ];
-    const ctx = this.ctx;
-    const fillPoly = (pts: { x: number; y: number }[], color: string) => {
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-    };
-    fillPoly([tpts[1], tpts[2], bpts[2], bpts[1]], "#3a2a22");
-    fillPoly([tpts[2], tpts[3], bpts[3], bpts[2]], "#2a201c");
-    fillPoly(tpts, `rgb(${72 + lowered * 18}, ${46 + lowered * 8}, ${34})`);
-    ctx.strokeStyle = "rgba(18,10,8,0.7)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(tpts[0].x, tpts[0].y);
-    for (let i = 1; i < 4; i++) ctx.lineTo(tpts[i].x, tpts[i].y);
-    ctx.closePath();
-    ctx.stroke();
   }
 
   private drawTileOverlay(x: number, y: number): void {
@@ -531,17 +440,8 @@ export class Renderer {
       ctx.globalAlpha = alpha;
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fill();
-      ctx.save();
-      ctx.clip();
-      ctx.globalCompositeOperation = "multiply";
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = this.rust;
-      ctx.fill();
-      ctx.restore();
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = "rgba(22,12,8,0.9)";
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = "rgba(22,12,8,0.55)";
+      ctx.lineWidth = 1;
       ctx.stroke();
     }
     ctx.restore();
@@ -591,6 +491,20 @@ export class Renderer {
     this.ctx.drawImage(this.knocked(img), x, y);
   }
 
+  private drawGlowBlob(cx: number, cy: number, rx: number, ry: number, alpha = 0.5): void {
+    const ctx = this.ctx;
+    ctx.save();
+    const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, Math.max(rx, ry));
+    g.addColorStop(0, `rgba(255, 150, 50, ${alpha})`);
+    g.addColorStop(0.4, `rgba(220, 80, 16, ${alpha * 0.45})`);
+    g.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   private drawUiText(
     text: string,
     x: number,
@@ -600,52 +514,46 @@ export class Renderer {
       color?: string;
       glow?: boolean;
       glowBlur?: number;
+      blob?: boolean;
       align?: CanvasTextAlign;
       weight?: string;
     } = {},
   ): void {
     const ctx = this.ctx;
+    const size = opts.size ?? 15;
     ctx.save();
-    ctx.font = `${opts.weight ?? "700"} ${opts.size ?? 15}px ${UI_FONT}`;
+    ctx.font = `${opts.weight ?? "700"} ${size}px ${UI_FONT}`;
     ctx.textAlign = opts.align ?? "left";
     ctx.textBaseline = "alphabetic";
-    if (opts.glow) {
-      ctx.shadowColor = "rgba(160, 48, 8, 0.95)";
-      ctx.shadowBlur = opts.glowBlur ?? 10;
-      ctx.fillStyle = opts.color ?? "#140c08";
-      ctx.fillText(text, x, y);
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = "rgba(255, 120, 30, 0.45)";
-      ctx.fillText(text, x, y);
+    const w = ctx.measureText(text).width;
+    const cx = opts.align === "center" ? x : opts.align === "right" ? x - w / 2 : x + w / 2;
+    const cy = y - size * 0.35;
+    if (opts.blob || opts.glow) {
+      this.drawGlowBlob(cx, cy, Math.max(28, w * 0.62 + 16), size * 0.95, opts.blob ? 0.62 : 0.38);
     }
-    ctx.shadowBlur = 0;
     ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
     ctx.fillStyle = opts.color ?? "#ffffff";
     ctx.fillText(text, x, y);
     ctx.restore();
   }
 
-  drawHud(code: string, moves: number): void {
-    this.drawMenuTab();
-    this.drawUiText("Passcode:", 398, 18, { size: 11, color: "#140c08", glow: true, glowBlur: 12 });
+  drawHud(code: string, moves: number, tab = "Menu"): void {
+    this.drawMenuTab(tab);
+    this.drawGlowBlob(468, 22, 100, 28, 0.6);
+    this.drawUiText("Passcode:", 398, 18, { size: 11, color: "#140c08" });
     this.drawUiText(code, 478, 18, { size: 11, color: "#140c08" });
-    this.drawUiText("Moves:", 422, 36, { size: 11, color: "#140c08", glow: true, glowBlur: 12 });
+    this.drawUiText("Moves:", 422, 36, { size: 11, color: "#140c08" });
     this.drawUiText(String(moves).padStart(6, "0"), 478, 36, { size: 11, color: "#140c08" });
   }
 
-  drawMenuTab(): void {
-    this.drawUiText("Menu", 14, 20, { size: 13, color: "#140c08", glow: true, glowBlur: 16 });
+  drawMenuTab(label = "Menu"): void {
+    this.drawGlowBlob(label.length > 8 ? 78 : 36, 14, label.length > 8 ? 78 : 38, 16, 0.7);
+    this.drawUiText(label, 14, 20, { size: 13, color: "#140c08" });
   }
 
-  hitMenuTab(mx: number, my: number): boolean {
-    return mx >= 8 && mx <= 70 && my >= 8 && my <= 26;
-  }
-
-  drawDigit(digit: number, x: number, y: number, scale = 1): void {
-    const [sx0, sx1] = STAGE_DIGIT_RUNS[digit] ?? STAGE_DIGIT_RUNS[0];
-    const srcW = sx1 - sx0;
-    const srcH = 43;
-    this.ctx.drawImage(this.knocked(this.assets.ui.numbers), sx0, 0, srcW, srcH, x, y, srcW * scale, srcH * scale);
+  hitMenuTab(mx: number, my: number, wide = false): boolean {
+    return mx >= 8 && mx <= (wide ? 168 : 70) && my >= 6 && my <= 28;
   }
 
   drawTitle(levelIndex: number, alpha: number, shake: { x: number; y: number }): void {
@@ -654,18 +562,12 @@ export class Renderer {
     ctx.globalAlpha = alpha;
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
-    const n = levelIndex + 1;
-    const stageImg = this.assets.ui.stage;
-    const tens = Math.floor(n / 10);
-    const ones = n % 10;
-    const tensW = (STAGE_DIGIT_RUNS[tens][1] - STAGE_DIGIT_RUNS[tens][0]);
-    const onesW = (STAGE_DIGIT_RUNS[ones][1] - STAGE_DIGIT_RUNS[ones][0]);
-    const total = 168 + tensW + 4 + onesW;
-    const x = Math.round((STAGE_W - total) / 2) + shake.x;
-    const y = 168 + shake.y;
-    ctx.drawImage(this.knocked(stageImg), x, y);
-    this.drawDigit(tens, x + 164, y);
-    this.drawDigit(ones, x + 164 + tensW + 4, y);
+    const n = String(levelIndex + 1).padStart(2, "0");
+    this.drawUiText(`STAGE ${n}`, STAGE_W / 2 + shake.x, 214 + shake.y, {
+      size: 36,
+      glow: true,
+      align: "center",
+    });
     ctx.restore();
   }
 
@@ -772,8 +674,19 @@ export class Renderer {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
     ctx.globalAlpha = alpha;
-    const card = this.assets.splash.author;
-    ctx.drawImage(card, (STAGE_W - card.width) / 2, (STAGE_H - card.height) / 2 - 10);
+    const lines = [
+      "All graphics, audio, actionscript and puzzles",
+      "in Bloxorz created by Damien Clarke,",
+      "DX Interactive, 21st June 2007.",
+    ];
+    lines.forEach((line, i) => {
+      this.drawUiText(line, STAGE_W / 2, 178 + i * 28, {
+        size: 14,
+        glow: true,
+        align: "center",
+        weight: "500",
+      });
+    });
     ctx.restore();
   }
 
@@ -932,7 +845,12 @@ export class Renderer {
       this.drawUiText(row.label, 48, y, { size: 13, glow: true });
       this.drawUiText(row.value, 520, y, { size: 13, glow: true, align: "right" });
     });
-    this.drawUiText(listen ?? "Left / Right change values. Enter rebinds. Esc back.", 42, 380, {
+    this.drawUiText("Left / Right change values. Enter rebinds a key.", 42, 368, {
+      size: 11,
+      glow: true,
+      weight: "500",
+    });
+    this.drawUiText(listen ?? "Shift+Enter or click right to rebind a button. Esc back.", 42, 386, {
       size: 11,
       glow: true,
       weight: "500",
