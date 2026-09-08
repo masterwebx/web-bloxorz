@@ -10,7 +10,7 @@ import {
   type Tile,
   W,
 } from "./engine";
-import { drawPixelText, textWidth } from "./font";
+import { drawPixelText } from "./font";
 
 const SX = 32.5;
 const SYX = -5;
@@ -502,41 +502,36 @@ export class Renderer {
   drawHud(code: string, moves: number): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    const g = ctx.createLinearGradient(388, 0, 550, 48);
-    g.addColorStop(0, "rgb(210, 88, 22)");
-    g.addColorStop(1, "rgb(194, 48, 0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(388, 0, 162, 46);
     this.drawMenuTab();
+    ctx.imageSmoothingEnabled = false;
+    const sx = STAGE_W / 551;
+    const sy = STAGE_H / 301;
     const ink = "#140c08";
-    drawPixelText(ctx, "Passcode:", 396, 8, ink, 1);
-    drawPixelText(ctx, code, 396 + textWidth("Passcode:", 1) + 4, 8, ink, 1);
-    drawPixelText(ctx, "Moves:", 421, 24, ink, 1);
-    drawPixelText(ctx, String(moves).padStart(6, "0"), 421 + textWidth("Moves:", 1) + 4, 24, ink, 1);
+    drawPixelText(ctx, code, 478 * sx, 9.2 * sy, ink, 1);
+    drawPixelText(ctx, String(moves).padStart(6, "0"), 478 * sx, 24.4 * sy, ink, 1);
     ctx.restore();
   }
 
   drawMenuTab(): void {
     const ctx = this.ctx;
-    const x = 10;
+    const x = 8;
     const y = 8;
-    const w = 52;
-    const h = 16;
+    const w = 56;
+    const h = 18;
     const g = ctx.createLinearGradient(x, y, x, y + h);
-    g.addColorStop(0, "#e0a050");
-    g.addColorStop(0.45, "#c07028");
-    g.addColorStop(1, "#8a4018");
+    g.addColorStop(0, "#e8b060");
+    g.addColorStop(0.5, "#c07830");
+    g.addColorStop(1, "#8a4014");
     ctx.fillStyle = g;
     ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = "rgba(40, 16, 4, 0.55)";
+    ctx.strokeStyle = "rgba(40, 16, 4, 0.5)";
     ctx.strokeRect(x + 0.5, y + 0.5, w, h);
     ctx.imageSmoothingEnabled = false;
-    drawPixelText(ctx, "Menu", x + 10, y + 4, "#140c08", 1);
+    drawPixelText(ctx, "Menu", x + 8, y + 5, "#140c08", 1);
   }
 
   hitMenuTab(mx: number, my: number): boolean {
-    return mx >= 10 && mx <= 62 && my >= 8 && my <= 24;
+    return mx >= 8 && mx <= 64 && my >= 8 && my <= 26;
   }
 
   private drawSpriteDigits(
@@ -839,16 +834,11 @@ export class Renderer {
       ctx.restore();
     });
     ctx.drawImage(this.knocked(this.assets.ui.pauseStats), 318, 164);
-    ctx.save();
-    ctx.shadowColor = "#c05018";
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = "#fff4e0";
-    ctx.font = "14px Trebuchet MS, sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(time, 504, 186);
-    ctx.fillText(String(stage + 1).padStart(2, "0"), 504, 210);
-    ctx.fillText(String(attempts), 504, 234);
-    ctx.restore();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(418, 164, 96, 72);
+    this.drawGlowLabel(time, 430, 186);
+    this.drawGlowLabel(String(stage + 1).padStart(2, "0"), 430, 210);
+    this.drawGlowLabel(String(attempts), 430, 234);
     ctx.restore();
   }
 
