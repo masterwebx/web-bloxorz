@@ -1,6 +1,5 @@
 import type { Assets } from "./assets";
 import { STAGE_H, STAGE_W } from "./assets";
-import { drawPixelText } from "./font";
 import {
   H,
   occupied,
@@ -224,43 +223,53 @@ function scrubBakedHud(img: HTMLImageElement): HTMLCanvasElement {
   return c;
 }
 
-/** Square rust tile from the lit top of the original standing sprite, lifted so faces stay readable. */
-function makeRustTile(src: HTMLCanvasElement): HTMLCanvasElement {
-  const tile = copyRect(src, 90, 40, 22, 20, 64, 64);
-  const g = tile.getContext("2d")!;
-  const data = g.getImageData(0, 0, 64, 64);
+function nativeCrop(
+  src: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+): HTMLCanvasElement {
+  const c = copyRect(src, sx, sy, sw, sh, sw, sh);
+  const g = c.getContext("2d")!;
+  const data = g.getImageData(0, 0, sw, sh);
   const px = data.data;
   let sr = 0;
   let sg = 0;
   let sb = 0;
   let n = 0;
   for (let i = 0; i < px.length; i += 4) {
-    if (px[i] + px[i + 1] + px[i + 2] > 50) {
+    if (px[i] + px[i + 1] + px[i + 2] > 40 && px[i + 3] > 8) {
       sr += px[i];
       sg += px[i + 1];
       sb += px[i + 2];
       n++;
     }
   }
-  const ar = n ? sr / n : 168;
-  const ag = n ? sg / n : 118;
-  const ab = n ? sb / n : 92;
+  const ar = n ? Math.round(sr / n) : 110;
+  const ag = n ? Math.round(sg / n) : 78;
+  const ab = n ? Math.round(sb / n) : 68;
   for (let i = 0; i < px.length; i += 4) {
-    let r = px[i];
-    let gv = px[i + 1];
-    let b = px[i + 2];
-    if (r + gv + b < 50) {
-      r = ar;
-      gv = ag;
-      b = ab;
+    if (px[i] + px[i + 1] + px[i + 2] < 40 || px[i + 3] < 8) {
+      px[i] = ar;
+      px[i + 1] = ag;
+      px[i + 2] = ab;
+      px[i + 3] = 255;
     }
-    px[i] = Math.min(255, r * 1.32 + 40);
-    px[i + 1] = Math.min(255, gv * 1.2 + 24);
-    px[i + 2] = Math.min(255, b * 1.08 + 12);
-    px[i + 3] = 255;
   }
   g.putImageData(data, 0, 0);
-  return tile;
+  return c;
+}
+
+/** Keep a 1×1×2 cuboid and rotate it into each pose so UVs never remap. */
+function settledCorners(state: BlockState, cube: boolean): [number, number, number][] {
+  if (cube || state.ori === "up") return boxCorners(boxFor(state, cube));
+  if (state.ori === "forward") {
+    const from: BlockState = { x: state.x, y: state.y - 1, ori: "up" };
+    return boxCorners(boxFor(from, false), { ...rollSpec(from, "down", false), angle: -Math.PI / 2 });
+  }
+  const from: BlockState = { x: state.x - 1, y: state.y, ori: "up" };
+  return boxCorners(boxFor(from, false), { ...rollSpec(from, "right", false), angle: Math.PI / 2 });
 }
 
 export class Renderer {
@@ -276,7 +285,7 @@ export class Renderer {
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
-    this.rust = makeRustTile(this.knocked(assets.block.up));
+    this.rust = nativeCrop(this.knocked(assets.block.up), 102, 54, 16, 52);
     this.levelBg = scrubBakedHud(assets.ui.levelBg);
   }
 
@@ -479,8 +488,13 @@ export class Renderer {
       boxState = anim.from;
     }
 
-    const box = boxFor(boxState, cube);
-    const corners = boxCorners(box, roll);
+    let corners: [number, number, number][];
+    if (roll) {
+      const base = settledCorners(boxState, cube);
+      corners = base.map((p) => rotateAround(p, roll.origin, roll.axis, roll.angle));
+    } else {
+      corners = settledCorners(boxState, cube);
+    }
     if (extraZ !== 0) {
       for (const c of corners) c[2] += extraZ;
     }
@@ -506,15 +520,7 @@ export class Renderer {
       anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38,
     );
 
-    const shade = [1, 0.62, 0.94, 0.78, 0.86, 0.96];
-    const uv: [number, number][] = [
-      [box.w, box.d],
-      [box.w, box.d],
-      [box.w, box.h],
-      [box.d, box.h],
-      [box.w, box.h],
-      [box.d, box.h],
-    ];
+    const shade = [1, 0.5, 0.84, 0.64, 0.74, 0.9];
 
     const ctx = this.ctx;
     ctx.save();
@@ -522,7 +528,7 @@ export class Renderer {
     for (const f of faces) {
       if (f.cross <= 0) continue;
       if (f.fi === 1 && extraZ >= -0.08) continue;
-      this.paintFace(this.rust, f.pts, shade[f.fi], uv[f.fi][0], uv[f.fi][1]);
+      this.paintFace(this.rust, f.pts, shade[f.fi]);
     }
     ctx.restore();
   }
@@ -531,19 +537,15 @@ export class Renderer {
     tex: HTMLCanvasElement,
     pts: { x: number; y: number }[],
     shade: number,
-    uw: number,
-    uh: number,
   ): void {
     const ctx = this.ctx;
-    const tilesU = Math.max(1, Math.round(uw));
-    const tilesV = Math.max(1, Math.round(uh));
     const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
     const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
     const grow = pts.map((p) => {
       const dx = p.x - cx;
       const dy = p.y - cy;
       const len = Math.hypot(dx, dy) || 1;
-      return { x: p.x + (dx / len) * 0.25, y: p.y + (dy / len) * 0.25 };
+      return { x: p.x + (dx / len) * 0.2, y: p.y + (dy / len) * 0.2 };
     });
     ctx.save();
     ctx.beginPath();
@@ -555,21 +557,17 @@ export class Renderer {
     const p1 = grow[1];
     const p3 = grow[3];
     ctx.setTransform(
-      (p1.x - p0.x) / tilesU,
-      (p1.y - p0.y) / tilesU,
-      (p3.x - p0.x) / tilesV,
-      (p3.y - p0.y) / tilesV,
+      (p1.x - p0.x) / tex.width,
+      (p1.y - p0.y) / tex.width,
+      (p3.x - p0.x) / tex.height,
+      (p3.y - p0.y) / tex.height,
       p0.x,
       p0.y,
     );
-    ctx.imageSmoothingEnabled = false;
-    for (let v = 0; v < tilesV; v++) {
-      for (let u = 0; u < tilesU; u++) {
-        ctx.drawImage(tex, 0, 0, tex.width, tex.height, u, v, 1, 1);
-      }
-    }
-    ctx.fillStyle = `rgba(36, 18, 10, ${Math.max(0, 0.42 - shade * 0.42)})`;
-    ctx.fillRect(0, 0, tilesU, tilesV);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(tex, 0, 0);
+    ctx.fillStyle = `rgba(18, 10, 6, ${(1 - shade) * 0.38})`;
+    ctx.fillRect(0, 0, tex.width, tex.height);
     ctx.restore();
   }
 
@@ -631,17 +629,9 @@ export class Renderer {
   }
 
   drawHud(code: string, moves: number, tab = "Menu"): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.filter = "none";
-    ctx.shadowBlur = 0;
-    ctx.shadowColor = "transparent";
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
     this.drawMenuTab(tab);
-    drawPixelText(ctx, `Passcode: ${code}`, 536, 8, "#f4f4f4", 2, "right");
-    drawPixelText(ctx, `Moves: ${String(moves).padStart(6, "0")}`, 536, 26, "#f4f4f4", 2, "right");
-    ctx.restore();
+    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", weight: "500", shadow: false });
+    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", weight: "500", shadow: false });
   }
 
   drawMenuTab(label = "Menu"): void {
