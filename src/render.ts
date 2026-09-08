@@ -740,7 +740,7 @@ export class Renderer {
   ): void {
     const ctx = this.ctx;
     const hot = !!opts.hot;
-    const size = (opts.size ?? 15) * (hot ? 1.08 : 1);
+    const size = (opts.size ?? 15) * (hot ? 1.12 : 1);
     ctx.save();
     ctx.font = `700 ${size}px ${UI_FONT}`;
     ctx.textAlign = opts.align ?? "left";
@@ -750,8 +750,8 @@ export class Renderer {
     ctx.shadowOffsetY = 0;
     const glowOn = opts.glow !== false;
     if (hot) {
-      ctx.shadowColor = "rgba(255, 255, 255, 0.95)";
-      ctx.shadowBlur = 22;
+      ctx.shadowColor = "rgba(255, 255, 255, 1)";
+      ctx.shadowBlur = 28;
     } else if (glowOn) {
       ctx.shadowColor = "rgba(255, 162, 0, 0.62)";
       ctx.shadowBlur = 20;
@@ -761,7 +761,10 @@ export class Renderer {
     }
     const tx = Math.round(x);
     const ty = Math.round(y);
-    ctx.fillStyle = opts.color ?? "#fff8e8";
+    ctx.fillStyle = opts.color ?? "#ffffff";
+    ctx.fillText(text, tx, ty);
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
     ctx.fillText(text, tx, ty);
     ctx.restore();
   }
