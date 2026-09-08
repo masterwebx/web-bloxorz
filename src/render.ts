@@ -173,51 +173,29 @@ const FACES: number[][] = [
   [3, 0, 4, 7],
 ];
 
-function makeRust(src: HTMLCanvasElement, seed: number): HTMLCanvasElement {
-  const g = src.getContext("2d")!;
-  const data = g.getImageData(0, 0, src.width, src.height).data;
-  const colors: [number, number, number][] = [];
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] > 40 && data[i] + data[i + 1] + data[i + 2] > 50) {
-      colors.push([data[i], data[i + 1], data[i + 2]]);
-    }
-  }
-  const small = document.createElement("canvas");
-  small.width = 12;
-  small.height = 12;
-  const sg = small.getContext("2d")!;
-  const img = sg.createImageData(12, 12);
-  for (let i = 0; i < 144; i++) {
-    const n = Math.sin(i * 12.9898 * seed) * 43758.5453;
-    const c = colors[Math.abs(Math.floor(n)) % colors.length];
-    const o = i * 4;
-    img.data[o] = c[0];
-    img.data[o + 1] = c[1];
-    img.data[o + 2] = c[2];
-    img.data[o + 3] = 255;
-  }
-  sg.putImageData(img, 0, 0);
-  const out = document.createElement("canvas");
-  out.width = 64;
-  out.height = 64;
-  const og = out.getContext("2d")!;
-  og.imageSmoothingEnabled = true;
-  og.drawImage(small, 0, 0, 64, 64);
-  return out;
+function copyRect(
+  src: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  tw: number,
+  th: number,
+): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = tw;
+  c.height = th;
+  const g = c.getContext("2d")!;
+  g.imageSmoothingEnabled = false;
+  g.drawImage(src, sx, sy, sw, sh, 0, 0, tw, th);
+  return c;
 }
 
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   cam: Camera = { x: 0, y: 0 };
   private knockCache = new Map<HTMLImageElement, HTMLCanvasElement>();
-  private rust: {
-    top: HTMLCanvasElement;
-    sideA: HTMLCanvasElement;
-    sideB: HTMLCanvasElement;
-    cubeTop: HTMLCanvasElement;
-    cubeA: HTMLCanvasElement;
-    cubeB: HTMLCanvasElement;
-  };
+  private rust: HTMLCanvasElement;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -225,17 +203,7 @@ export class Renderer {
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
-    const up = this.knocked(assets.block.up);
-    const a = makeRust(up, 1.17);
-    const b = makeRust(up, 2.63);
-    this.rust = {
-      top: a,
-      sideA: a,
-      sideB: b,
-      cubeTop: a,
-      cubeA: a,
-      cubeB: b,
-    };
+    this.rust = copyRect(this.knocked(assets.block.up), 103, 55, 16, 52, 32, 64);
   }
 
   private knocked(img: HTMLImageElement): HTMLCanvasElement {
@@ -459,9 +427,8 @@ export class Renderer {
       anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38,
     );
 
-    const tex = cube
-      ? [this.rust.cubeTop, this.rust.cubeTop, this.rust.cubeA, this.rust.cubeB, this.rust.cubeA, this.rust.cubeB]
-      : [this.rust.top, this.rust.top, this.rust.sideA, this.rust.sideB, this.rust.sideA, this.rust.sideB];
+    const sheet = this.rust;
+    const tex = [sheet, sheet, sheet, sheet, sheet, sheet];
     const shade = [1, 0.32, 0.82, 0.58, 0.7, 0.9];
 
     const ctx = this.ctx;
@@ -510,7 +477,7 @@ export class Renderer {
       p0.x,
       p0.y,
     );
-    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(tex, 0, 0);
     ctx.fillStyle = `rgba(8, 4, 2, ${1 - shade})`;
     ctx.fillRect(0, 0, w, h);
@@ -549,6 +516,7 @@ export class Renderer {
       size?: number;
       color?: string;
       glow?: boolean;
+      shadow?: boolean;
       align?: CanvasTextAlign;
       weight?: string;
     } = {},
@@ -566,8 +534,10 @@ export class Renderer {
     ctx.shadowOffsetY = 0;
     const tx = Math.round(x);
     const ty = Math.round(y);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-    ctx.fillText(text, tx + 1, ty + 1);
+    if (opts.shadow !== false) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.16)";
+      ctx.fillText(text, tx + 1, ty + 1);
+    }
     ctx.fillStyle = opts.color ?? "#fff8e8";
     ctx.fillText(text, tx, ty);
     ctx.restore();
@@ -575,8 +545,8 @@ export class Renderer {
 
   drawHud(code: string, moves: number, tab = "Menu"): void {
     this.drawMenuTab(tab);
-    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", weight: "500" });
-    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", weight: "500" });
+    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", weight: "500", shadow: false });
+    this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", weight: "500", shadow: false });
   }
 
   drawMenuTab(label = "Menu"): void {
