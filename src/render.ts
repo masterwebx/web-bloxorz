@@ -173,22 +173,128 @@ const FACES: number[][] = [
   [3, 0, 4, 7],
 ];
 
-function copyRect(
+function sampleBilinear(img: ImageData, x: number, y: number): [number, number, number, number] {
+  const w = img.width;
+  const h = img.height;
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(x)));
+  const y0 = Math.max(0, Math.min(h - 1, Math.floor(y)));
+  const x1 = Math.max(0, Math.min(w - 1, x0 + 1));
+  const y1 = Math.max(0, Math.min(h - 1, y0 + 1));
+  const fx = x - Math.floor(x);
+  const fy = y - Math.floor(y);
+  const at = (ix: number, iy: number): [number, number, number, number] => {
+    const i = (iy * w + ix) * 4;
+    return [img.data[i], img.data[i + 1], img.data[i + 2], img.data[i + 3]];
+  };
+  const a = at(x0, y0);
+  const b = at(x1, y0);
+  const c = at(x0, y1);
+  const d = at(x1, y1);
+  const mix = (p: number[], q: number[], t: number) => p.map((v, i) => p[i] + (q[i] - v) * t);
+  const top = mix(a, b, fx);
+  const bot = mix(c, d, fx);
+  const out = mix(top, bot, fy);
+  return [out[0], out[1], out[2], out[3]];
+}
+
+function insetQuad(
+  pts: { x: number; y: number }[],
+  t: number,
+): { x: number; y: number }[] {
+  const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+  const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+  return pts.map((p) => ({ x: p.x + (cx - p.x) * t, y: p.y + (cy - p.y) * t }));
+}
+
+function unprojectQuad(
   src: HTMLCanvasElement,
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
+  quad: { x: number; y: number }[],
   tw: number,
   th: number,
 ): HTMLCanvasElement {
+  const g = src.getContext("2d")!;
+  const img = g.getImageData(0, 0, src.width, src.height);
+  const q = insetQuad(quad, 0.1);
   const c = document.createElement("canvas");
   c.width = tw;
   c.height = th;
-  const g = c.getContext("2d")!;
-  g.imageSmoothingEnabled = false;
-  g.drawImage(src, sx, sy, sw, sh, 0, 0, tw, th);
+  const out = c.getContext("2d")!;
+  const dst = out.createImageData(tw, th);
+  let sr = 0;
+  let sg = 0;
+  let sb = 0;
+  let n = 0;
+  for (let v = 0; v < th; v++) {
+    const tv = (v + 0.5) / th;
+    for (let u = 0; u < tw; u++) {
+      const tu = (u + 0.5) / tw;
+      const x =
+        (1 - tv) * ((1 - tu) * q[0].x + tu * q[1].x) + tv * ((1 - tu) * q[3].x + tu * q[2].x);
+      const y =
+        (1 - tv) * ((1 - tu) * q[0].y + tu * q[1].y) + tv * ((1 - tu) * q[3].y + tu * q[2].y);
+      const px = sampleBilinear(img, x, y);
+      const i = (v * tw + u) * 4;
+      if (px[3] > 16 && px[0] + px[1] + px[2] > 30) {
+        dst.data[i] = px[0];
+        dst.data[i + 1] = px[1];
+        dst.data[i + 2] = px[2];
+        dst.data[i + 3] = 255;
+        sr += px[0];
+        sg += px[1];
+        sb += px[2];
+        n++;
+      }
+    }
+  }
+  const ar = n ? Math.round(sr / n) : 118;
+  const ag = n ? Math.round(sg / n) : 82;
+  const ab = n ? Math.round(sb / n) : 70;
+  for (let i = 0; i < dst.data.length; i += 4) {
+    if (dst.data[i + 3] < 16) {
+      dst.data[i] = ar;
+      dst.data[i + 1] = ag;
+      dst.data[i + 2] = ab;
+      dst.data[i + 3] = 255;
+    }
+  }
+  out.putImageData(dst, 0, 0);
   return c;
+}
+
+function spriteOffset(
+  box: { w: number; d: number; h: number },
+  tipX: number,
+  tipY: number,
+): { x: number; y: number } {
+  const pts = boxCorners({ x: 0, y: 0, z: GROUND, ...box });
+  let tip = project(pts[0][0], pts[0][1], pts[0][2]);
+  for (const p of pts) {
+    const s = project(p[0], p[1], p[2]);
+    if (s.y < tip.y) tip = s;
+  }
+  return { x: tipX - tip.x, y: tipY - tip.y };
+}
+
+function faceQuad(
+  box: { w: number; d: number; h: number },
+  face: number[],
+  ox: number,
+  oy: number,
+): { x: number; y: number }[] {
+  const pts = boxCorners({ x: 0, y: 0, z: GROUND, ...box });
+  return face.map((i) => {
+    const s = project(pts[i][0], pts[i][1], pts[i][2]);
+    return { x: s.x + ox, y: s.y + oy };
+  });
+}
+
+function isFloorFace(corners: [number, number, number][], idx: number[]): boolean {
+  const pts = idx.map((i) => corners[i]);
+  const avgZ = (pts[0][2] + pts[1][2] + pts[2][2] + pts[3][2]) / 4;
+  const e1 = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]];
+  const e2 = [pts[3][0] - pts[0][0], pts[3][1] - pts[0][1], pts[3][2] - pts[0][2]];
+  const nz = e1[0] * e2[1] - e1[1] * e2[0];
+  return avgZ < GROUND + 0.18 && nz < 0;
 }
 
 /** Original stage art already paints Passcode/Moves into the bitmap. Wipe that under-layer. */
@@ -223,45 +329,6 @@ function scrubBakedHud(img: HTMLImageElement): HTMLCanvasElement {
   return c;
 }
 
-function nativeCrop(
-  src: HTMLCanvasElement,
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
-): HTMLCanvasElement {
-  const c = copyRect(src, sx, sy, sw, sh, sw, sh);
-  const g = c.getContext("2d")!;
-  const data = g.getImageData(0, 0, sw, sh);
-  const px = data.data;
-  let sr = 0;
-  let sg = 0;
-  let sb = 0;
-  let n = 0;
-  for (let i = 0; i < px.length; i += 4) {
-    if (px[i] + px[i + 1] + px[i + 2] > 40 && px[i + 3] > 8) {
-      sr += px[i];
-      sg += px[i + 1];
-      sb += px[i + 2];
-      n++;
-    }
-  }
-  const ar = n ? Math.round(sr / n) : 110;
-  const ag = n ? Math.round(sg / n) : 78;
-  const ab = n ? Math.round(sb / n) : 68;
-  for (let i = 0; i < px.length; i += 4) {
-    if (px[i] + px[i + 1] + px[i + 2] < 40 || px[i + 3] < 8) {
-      px[i] = ar;
-      px[i + 1] = ag;
-      px[i + 2] = ab;
-      px[i + 3] = 255;
-    }
-  }
-  g.putImageData(data, 0, 0);
-  return c;
-}
-
-/** Keep a 1×1×2 cuboid and rotate it into each pose so UVs never remap. */
 function settledCorners(state: BlockState, cube: boolean): [number, number, number][] {
   if (cube || state.ori === "up") return boxCorners(boxFor(state, cube));
   if (state.ori === "forward") {
@@ -276,7 +343,8 @@ export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   cam: Camera = { x: 0, y: 0 };
   private knockCache = new Map<HTMLImageElement, HTMLCanvasElement>();
-  private rust: HTMLCanvasElement;
+  private rustEnd: HTMLCanvasElement;
+  private rustSide: HTMLCanvasElement;
   private levelBg: HTMLCanvasElement;
 
   constructor(
@@ -285,7 +353,14 @@ export class Renderer {
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
-    this.rust = nativeCrop(this.knocked(assets.block.up), 102, 54, 16, 52);
+    const up = this.knocked(assets.block.up);
+    const flat = this.knocked(assets.block.forward);
+    const stand = { w: 1, d: 1, h: 2 };
+    const lie = { w: 1, d: 2, h: 1 };
+    const so = spriteOffset(stand, 110, 36);
+    const fo = spriteOffset(lie, 89, 32);
+    this.rustEnd = unprojectQuad(up, faceQuad(stand, FACES[0], so.x, so.y), 96, 96);
+    this.rustSide = unprojectQuad(flat, faceQuad(lie, FACES[0], fo.x, fo.y), 96, 192);
     this.levelBg = scrubBakedHud(assets.ui.levelBg);
   }
 
@@ -520,15 +595,16 @@ export class Renderer {
       anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38,
     );
 
-    const shade = [1, 0.5, 0.84, 0.64, 0.74, 0.9];
+    const shade = [1, 0.55, 0.82, 0.66, 0.74, 0.88];
 
     const ctx = this.ctx;
     ctx.save();
     ctx.globalAlpha = alpha;
     for (const f of faces) {
       if (f.cross <= 0) continue;
-      if (f.fi === 1 && extraZ >= -0.08) continue;
-      this.paintFace(this.rust, f.pts, shade[f.fi]);
+      if (extraZ >= -0.08 && isFloorFace(corners, FACES[f.fi])) continue;
+      const tex = cube || f.fi === 0 || f.fi === 1 ? this.rustEnd : this.rustSide;
+      this.paintFace(tex, f.pts, shade[f.fi]);
     }
     ctx.restore();
   }
@@ -545,13 +621,15 @@ export class Renderer {
       const dx = p.x - cx;
       const dy = p.y - cy;
       const len = Math.hypot(dx, dy) || 1;
-      return { x: p.x + (dx / len) * 0.2, y: p.y + (dy / len) * 0.2 };
+      return { x: p.x + (dx / len) * 0.55, y: p.y + (dy / len) * 0.55 };
     });
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(grow[0].x, grow[0].y);
     for (let i = 1; i < 4; i++) ctx.lineTo(grow[i].x, grow[i].y);
     ctx.closePath();
+    ctx.fillStyle = `rgb(${Math.round(118 * shade)},${Math.round(82 * shade)},${Math.round(70 * shade)})`;
+    ctx.fill();
     ctx.clip();
     const p0 = grow[0];
     const p1 = grow[1];
@@ -566,7 +644,7 @@ export class Renderer {
     );
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(tex, 0, 0);
-    ctx.fillStyle = `rgba(18, 10, 6, ${(1 - shade) * 0.38})`;
+    ctx.fillStyle = `rgba(16, 8, 4, ${(1 - shade) * 0.32})`;
     ctx.fillRect(0, 0, tex.width, tex.height);
     ctx.restore();
   }
