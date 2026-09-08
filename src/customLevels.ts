@@ -1,20 +1,42 @@
 import type { LevelDef } from "./levels";
 
 const STORE = "bloxorz-custom-stages-v1";
+const DOWNLOADED = "bloxorz-downloaded-stages-v1";
+const PACKS = "bloxorz-stage-packs-v1";
 
 export interface SavedStage {
   name: string;
+  author: string;
   code: string;
   def: LevelDef;
+  source?: "local" | "downloaded";
+}
+
+export interface StagePack {
+  id: string;
+  name: string;
+  author: string;
+  codes: string[];
 }
 
 export function emptyDraft(): LevelDef {
-  const tiles = Array.from({ length: 10 }, () => "               ");
+  const tiles = [
+    "               ",
+    "               ",
+    "               ",
+    "               ",
+    "  bbbbbbbe    ",
+    "               ",
+    "               ",
+    "               ",
+    "               ",
+    "               ",
+  ];
   return {
     id: "custom",
     code: "000000",
     tiles,
-    spawn: [7, 5],
+    spawn: [2, 4],
     switches: [],
     splits: [],
   };
@@ -62,24 +84,75 @@ export function decodeLevel(code: string): LevelDef | null {
   }
 }
 
-export function listSaved(): SavedStage[] {
+function readList(key: string): SavedStage[] {
   try {
-    const raw = localStorage.getItem(STORE);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
-    return JSON.parse(raw) as SavedStage[];
+    const parsed = JSON.parse(raw) as SavedStage[];
+    return parsed.map((s) => ({
+      ...s,
+      author: s.author || "Unknown",
+      source: s.source ?? (key === DOWNLOADED ? "downloaded" : "local"),
+    }));
   } catch {
     return [];
   }
 }
 
+function writeList(key: string, all: SavedStage[]): void {
+  localStorage.setItem(key, JSON.stringify(all.slice(0, 80)));
+}
+
+export function listSaved(): SavedStage[] {
+  return readList(STORE);
+}
+
+export function listDownloaded(): SavedStage[] {
+  return readList(DOWNLOADED);
+}
+
+export function listAllStages(): SavedStage[] {
+  return [...listSaved(), ...listDownloaded()];
+}
+
 export function saveStage(stage: SavedStage): void {
-  const all = listSaved().filter((s) => s.code !== stage.code);
-  all.unshift(stage);
-  localStorage.setItem(STORE, JSON.stringify(all.slice(0, 40)));
+  const key = stage.source === "downloaded" ? DOWNLOADED : STORE;
+  const all = readList(key).filter((s) => s.code !== stage.code);
+  all.unshift({ ...stage, source: stage.source ?? "local" });
+  writeList(key, all);
 }
 
 export function deleteStage(code: string): void {
-  localStorage.setItem(STORE, JSON.stringify(listSaved().filter((s) => s.code !== code)));
+  writeList(STORE, listSaved().filter((s) => s.code !== code));
+  writeList(DOWNLOADED, listDownloaded().filter((s) => s.code !== code));
+}
+
+export function findStage(code: string): SavedStage | undefined {
+  return listAllStages().find((s) => s.code === code);
+}
+
+export function listPacks(): StagePack[] {
+  try {
+    const raw = localStorage.getItem(PACKS);
+    if (!raw) return [];
+    return JSON.parse(raw) as StagePack[];
+  } catch {
+    return [];
+  }
+}
+
+export function savePack(pack: StagePack): void {
+  const all = listPacks().filter((p) => p.id !== pack.id);
+  all.unshift(pack);
+  localStorage.setItem(PACKS, JSON.stringify(all.slice(0, 40)));
+}
+
+export function deletePack(id: string): void {
+  localStorage.setItem(PACKS, JSON.stringify(listPacks().filter((p) => p.id !== id)));
+}
+
+export function packStages(pack: StagePack): SavedStage[] {
+  return pack.codes.map((c) => findStage(c)).filter((s): s is SavedStage => !!s);
 }
 
 export function isPlayable(def: LevelDef): string | null {

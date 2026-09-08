@@ -90,6 +90,10 @@ export class Input {
     return this.padDown.has(this.settings.pads[action]);
   }
 
+  justButton(n: number): boolean {
+    return this.padDown.has(n);
+  }
+
   consumeMove(): "up" | "down" | "left" | "right" | null {
     if (this.moveCool > 0) return null;
     const dirs: ("up" | "down" | "left" | "right")[] = ["up", "down", "left", "right"];

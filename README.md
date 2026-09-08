@@ -1,6 +1,8 @@
-# Bloxorz
+# Player-named Bloxorz remake
 
 A browser remake of Damien Clarke's 2007 puzzle game **Bloxorz**. All 33 original stages are included, with the same passcodes, switches, bridges, split blocks, and orange tiles.
+
+On first launch you enter a name. The title becomes that name plus **ORZ** — Wex is **WEXORZ**, David is **DAVIDORZ**. Change it later in Settings.
 
 This project reconstructs the Flash game using:
 
@@ -21,9 +23,43 @@ Bloxorz was created by Damien Clarke / DX Interactive (21 June 2007). This is an
 
 Passcodes sit in the top-right of each stage. Open **Load Stage** from the menu and type a six-digit code to jump there.
 
-**Settings** (main menu) has music and SFX sliders, rumble on/off, and keyboard/gamepad remapping.
+**Settings** has your player name, music and SFX sliders, rumble on/off, and keyboard/gamepad remapping.
 
-**Stage Creator** lets you paint a stage, then **Test** it. You have to beat your stage before it can be saved. Saved stages get a `BX1.` share code you can copy. **Play** loads your stages or a pasted code.
+## Stage Creator
+
+From the main menu, **Stage Creator** splits into **Create** and **Play**.
+
+### Create
+
+- **New Stage** — paint a 15×10 grid. A new stage starts with a stone path, a spawn, and an exit already connected.
+- **Manage** — edit or delete local and downloaded stages, or build a **stage pack** (an ordered list of stages). Enter opens a stage in the editor or plays a pack. Delete / Backspace removes a stage or pack.
+
+Keyboard and controller both work in the editor: arrows / stick move the cursor, Confirm / A paints, `[` `]` or LB/RB (or X) cycle tools, Enter / Start tests the stage.
+
+You have to beat a stage before it can be saved. Saved stages get a `BX1.` share code you can copy, and they store your player name as the author.
+
+### Play
+
+- **Enter Code** — paste or type a `BX1.` share code
+- **Offline** — stages saved on this machine
+- **Online** — stages listed in the community JSON (see below)
+
+Custom stages show their **name** and **author** on the title card, the same way classic play shows `STAGE 01`.
+
+## Community stages (Online)
+
+Online play reads `public/community/stages.json`. The game tries GitHub first:
+
+`https://raw.githubusercontent.com/masterwebx/web-bloxorz/main/public/community/stages.json`
+
+then falls back to the copy bundled with the app.
+
+Add a stage by appending an object to `stages` with `name`, `author`, and either:
+
+- `"code": "BX1...."` from the editor, or
+- `"tiles"` (10 strings of 15 characters) plus `"spawn": [x, y]`, with optional `switches` and `splits`
+
+Characters: `b` stone, `e` exit, `s` soft switch, `h` heavy switch, `f` fragile, `v` split, `l`/`r` bridges.
 
 | Stage | Code |
 | --- | --- |

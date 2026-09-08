@@ -25,6 +25,7 @@ export interface Settings {
   music: number;
   sfx: number;
   rumble: boolean;
+  playerName: string;
   keys: Record<Action, string>;
   pads: Record<Action, number>;
 }
@@ -33,6 +34,7 @@ const DEFAULTS: Settings = {
   music: 0.7,
   sfx: 0.9,
   rumble: true,
+  playerName: "",
   keys: {
     up: "ArrowUp",
     down: "ArrowDown",
@@ -66,6 +68,7 @@ export function loadSettings(): Settings {
       music: clamp01(parsed.music ?? DEFAULTS.music),
       sfx: clamp01(parsed.sfx ?? DEFAULTS.sfx),
       rumble: parsed.rumble !== false,
+      playerName: typeof parsed.playerName === "string" ? parsed.playerName : "",
       keys: { ...DEFAULTS.keys, ...parsed.keys },
       pads: { ...DEFAULTS.pads, ...parsed.pads },
     };
@@ -80,4 +83,9 @@ export function saveSettings(s: Settings): void {
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
+}
+
+export function brandName(name: string): string {
+  const stem = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "BLOX";
+  return `${stem}ORZ`;
 }
