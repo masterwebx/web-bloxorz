@@ -2,6 +2,7 @@ import type { Assets } from "./assets";
 import { STAGE_H, STAGE_W } from "./assets";
 import {
   H,
+  occupied,
   type Anim,
   type BlockState,
   type Cell,
@@ -10,7 +11,6 @@ import {
   type Tile,
   W,
 } from "./engine";
-import { drawPixelText } from "./font";
 
 const SX = 32.5;
 const SYX = -5;
@@ -26,6 +26,7 @@ const MENU_X = 42;
 export const MENU_Y = 168;
 export const MENU_GAP = 26;
 export const MENU_COUNT = 5;
+const UI_FONT = "Orbitron, sans-serif";
 /** 329.png is ordered 1–9, then 0. Values are [sx0, sx1]. */
 const STAGE_DIGIT_RUNS: [number, number][] = [
   [406, 449],
@@ -214,6 +215,9 @@ export class Renderer {
     c.height = 28;
     const g = c.getContext("2d")!;
     g.drawImage(src, 90, 52, 28, 28, 0, 0, 28, 28);
+    const data = g.getImageData(0, 0, 28, 28);
+    for (let i = 0; i < data.data.length; i += 4) data.data[i + 3] = 255;
+    g.putImageData(data, 0, 0);
     return this.ctx.createPattern(c, "repeat") ?? this.noise;
   }
 
@@ -269,7 +273,8 @@ export class Renderer {
   }
 
   drawLevel(stage: Stage): void {
-    const intro = stage.assemble;
+    const scatter = stage.scatter;
+    const intro = scatter > 0 ? 1 : stage.assemble;
     for (let y = 0; y < H; y++) {
       for (let x = W - 1; x >= 0; x--) {
         const tile = stage.tileAt(x, y);
@@ -280,8 +285,20 @@ export class Renderer {
         if (e <= 0.01) continue;
         const lift = (1 - Math.min(1, e)) * (88 + (x + y) * 3);
         const drift = (1 - Math.min(1, e)) * ((x - 7) * 14 + (y % 2 === 0 ? -10 : 12));
+        const seed = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        const r = seed - Math.floor(seed);
+        const s = scatter * scatter;
+        const flyX = Math.cos(r * Math.PI * 2) * s * 160;
+        const flyY = Math.sin(r * Math.PI * 2) * s * 110 - s * 30;
+        const rot = (r - 0.5) * s * 7.4;
+        const dx = this.cam.x + p.x + TILE_OX + drift + flyX;
+        const dy = this.cam.y + p.y + TILE_OY - lift + flyY;
         this.ctx.save();
-        this.ctx.globalAlpha = Math.min(1, t * 1.4);
+        this.ctx.globalAlpha = Math.min(1, t * 1.4) * (1 - scatter * 0.92);
+        this.ctx.translate(dx + 25, dy + 17);
+        if (rot) this.ctx.rotate(rot);
+        const drawX = -25;
+        const drawY = -17;
         if (tile === "bridgeL" || tile === "bridgeR") {
           const b = stage.bridgeAt(x, y)!;
           const vis = b.frame / 7;
@@ -289,16 +306,13 @@ export class Renderer {
             this.ctx.restore();
             continue;
           }
-          this.ctx.globalAlpha = Math.min(1, t * 1.4) * Math.min(1, vis);
+          this.ctx.globalAlpha = Math.min(1, t * 1.4) * Math.min(1, vis) * (1 - scatter * 0.92);
           const rise = (1 - vis) * 10;
-          this.ctx.drawImage(
-            this.assets.tiles.stone,
-            this.cam.x + p.x + TILE_OX + drift,
-            this.cam.y + p.y + TILE_OY + rise - lift,
-          );
+          this.ctx.drawImage(this.assets.tiles.stone, drawX, drawY + rise);
           if (b.flash > 0) {
-            this.ctx.globalAlpha = Math.min(0.7, b.flash * 2) * Math.min(1, t * 1.4);
+            this.ctx.globalAlpha = Math.min(0.7, b.flash * 2) * Math.min(1, t * 1.4) * (1 - scatter);
             this.ctx.fillStyle = b.flashOn ? "rgba(70,255,90,0.7)" : "rgba(255,50,40,0.7)";
+            this.ctx.translate(-this.cam.x - p.x - TILE_OX, -this.cam.y - p.y - TILE_OY);
             this.drawTileOverlay(x, y);
           }
           this.ctx.restore();
@@ -309,12 +323,12 @@ export class Renderer {
           this.ctx.restore();
           continue;
         }
-        this.ctx.drawImage(img, this.cam.x + p.x + TILE_OX + drift, this.cam.y + p.y + TILE_OY - lift);
+        this.ctx.drawImage(img, drawX, drawY);
         this.ctx.restore();
       }
     }
 
-    if (intro >= 1) {
+    if (intro >= 1 && scatter < 0.08) {
       for (const it of this.blockDrawables(stage)) it.draw();
     }
   }
@@ -391,7 +405,23 @@ export class Renderer {
         anim.kind === "drop" ||
         anim.kind === "splitdrop");
     if (!moving) {
+      this.drawBlockShadow(state, cube, 0.42);
       this.drawBlockSprite(state, cube);
+      return;
+    }
+    if (anim?.kind === "drop") {
+      const t = ease(anim.t / anim.dur);
+      this.drawBlockShadow(anim.to, cube, 0.15 + t * 0.3);
+      this.drawBlockSprite(anim.to, cube, (1 - t) * 155);
+      return;
+    }
+    if (anim?.kind === "splitdrop") {
+      const t = ease(anim.t / anim.dur);
+      const st: BlockState = which === 0
+        ? { x: anim.from.x, y: anim.from.y, ori: "up" }
+        : { x: anim.to2!.x, y: anim.to2!.y, ori: "up" };
+      this.drawBlockShadow(st, true, 0.15 + t * 0.3);
+      this.drawBlockSprite(st, true, (1 - t) * 130);
       return;
     }
     const ctx = this.ctx;
@@ -406,16 +436,6 @@ export class Renderer {
       boxState = from;
       const spec = rollSpec(from, anim.dir, cube);
       roll = { ...spec, angle: spec.angle * t };
-    } else if (anim?.kind === "drop") {
-      const t = ease(anim.t / anim.dur);
-      extraZ = (1 - t) * 6.5;
-      boxState = anim.to;
-    } else if (anim?.kind === "splitdrop") {
-      const t = ease(anim.t / anim.dur);
-      extraZ = (1 - t) * 5;
-      boxState = which === 0
-        ? { x: anim.from.x, y: anim.from.y, ori: "up" }
-        : { x: anim.to2!.x, y: anim.to2!.y, ori: "up" };
     } else if (anim?.kind === "fall") {
       const t = anim.t / anim.dur;
       extraZ = -t * t * 9;
@@ -454,8 +474,9 @@ export class Renderer {
     }).sort((a, b) => a.depth - b.depth);
 
     ctx.save();
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    this.drawBlockShadow(boxState, cube, anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38);
     for (const f of faces) {
       if (f.cross <= 0) continue;
       if (f.fi === 1 && extraZ >= -0.08) continue;
@@ -464,22 +485,49 @@ export class Renderer {
       for (let i = 1; i < 4; i++) ctx.lineTo(f.pts[i].x, f.pts[i].y);
       ctx.closePath();
       const [r, g, b] = FACE_COL[f.fi];
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fill();
       ctx.save();
       ctx.clip();
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = this.rust;
-      ctx.globalAlpha = alpha * 0.55;
       ctx.fill();
       ctx.restore();
-      ctx.strokeStyle = "rgba(22,12,8,0.85)";
-      ctx.lineWidth = 1.15;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = "rgba(22,12,8,0.9)";
+      ctx.lineWidth = 1.2;
       ctx.stroke();
     }
     ctx.restore();
   }
 
-  private drawBlockSprite(state: BlockState, cube: boolean): void {
+  private drawBlockShadow(state: BlockState, cube: boolean, alpha: number): void {
+    const cells = cube ? [{ x: state.x, y: state.y }] : occupied(state);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = `rgba(6, 2, 0, ${alpha})`;
+    const ox = 10;
+    const oy = 5;
+    for (const c of cells) {
+      const pts = [
+        project(c.x, c.y, 0.01),
+        project(c.x + 1, c.y, 0.01),
+        project(c.x + 1, c.y + 1, 0.01),
+        project(c.x, c.y + 1, 0.01),
+      ];
+      ctx.beginPath();
+      ctx.moveTo(this.cam.x + pts[0].x + ox, this.cam.y + pts[0].y + oy);
+      for (let i = 1; i < 4; i++) ctx.lineTo(this.cam.x + pts[i].x + ox, this.cam.y + pts[i].y + oy);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawBlockSprite(state: BlockState, cube: boolean, lift = 0): void {
     const img = cube
       ? this.assets.block.cube
       : state.ori === "up"
@@ -490,25 +538,55 @@ export class Renderer {
     const p = project(state.x, state.y, 0);
     const foot =
       cube || state.ori === "up"
-        ? { ax: 93, ay: 114, sx: 10, sy: 17.5 }
+        ? { ax: 93, ay: 114, sx: 16, sy: 20 }
         : state.ori === "forward"
-          ? { ax: 82, ay: 98, sx: 20, sy: 35 }
-          : { ax: 124, ay: 109, sx: 10, sy: 17.5 };
+          ? { ax: 82, ay: 98, sx: 26, sy: 38 }
+          : { ax: 124, ay: 109, sx: 16, sy: 21 };
     const x = this.cam.x + p.x + foot.sx - foot.ax;
-    const y = this.cam.y + p.y + foot.sy - foot.ay;
+    const y = this.cam.y + p.y + foot.sy - foot.ay - lift;
     this.ctx.drawImage(this.knocked(img), x, y);
+  }
+
+  private drawUiText(
+    text: string,
+    x: number,
+    y: number,
+    opts: {
+      size?: number;
+      color?: string;
+      glow?: boolean;
+      align?: CanvasTextAlign;
+      weight?: string;
+    } = {},
+  ): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = `${opts.weight ?? "700"} ${opts.size ?? 15}px ${UI_FONT}`;
+    ctx.textAlign = opts.align ?? "left";
+    ctx.textBaseline = "alphabetic";
+    if (opts.glow) {
+      ctx.shadowColor = "rgba(210, 72, 16, 0.95)";
+      ctx.shadowBlur = 7;
+      ctx.fillStyle = "#ffc080";
+      ctx.fillText(text, x, y);
+      ctx.shadowBlur = 0;
+    }
+    ctx.fillStyle = opts.color ?? "#ffffff";
+    ctx.fillText(text, x, y);
+    ctx.restore();
   }
 
   drawHud(code: string, moves: number): void {
     const ctx = this.ctx;
     ctx.save();
     this.drawMenuTab();
-    ctx.imageSmoothingEnabled = false;
-    const sx = STAGE_W / 551;
-    const sy = STAGE_H / 301;
-    const ink = "#140c08";
-    drawPixelText(ctx, code, 478 * sx, 9.2 * sy, ink, 1);
-    drawPixelText(ctx, String(moves).padStart(6, "0"), 478 * sx, 24.4 * sy, ink, 1);
+    const sample = ctx.getImageData(508, 10, 1, 1).data;
+    ctx.fillStyle = `rgb(${sample[0]},${sample[1]},${sample[2]})`;
+    ctx.fillRect(392, 4, 158, 40);
+    this.drawUiText("Passcode:", 398, 18, { size: 11, color: "#140c08", weight: "700" });
+    this.drawUiText(code, 478, 18, { size: 11, color: "#140c08", weight: "700" });
+    this.drawUiText("Moves:", 422, 36, { size: 11, color: "#140c08", weight: "700" });
+    this.drawUiText(String(moves).padStart(6, "0"), 478, 36, { size: 11, color: "#140c08", weight: "700" });
     ctx.restore();
   }
 
@@ -516,7 +594,7 @@ export class Renderer {
     const ctx = this.ctx;
     const x = 8;
     const y = 8;
-    const w = 56;
+    const w = 62;
     const h = 18;
     const g = ctx.createLinearGradient(x, y, x, y + h);
     g.addColorStop(0, "#e8b060");
@@ -526,12 +604,11 @@ export class Renderer {
     ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = "rgba(40, 16, 4, 0.5)";
     ctx.strokeRect(x + 0.5, y + 0.5, w, h);
-    ctx.imageSmoothingEnabled = false;
-    drawPixelText(ctx, "Menu", x + 8, y + 5, "#140c08", 1);
+    this.drawUiText("Menu", x + 31, y + 14, { size: 11, color: "#140c08", align: "center", weight: "700" });
   }
 
   hitMenuTab(mx: number, my: number): boolean {
-    return mx >= 8 && mx <= 64 && my >= 8 && my <= 26;
+    return mx >= 8 && mx <= 70 && my >= 8 && my <= 26;
   }
 
   private drawSpriteDigits(
@@ -589,51 +666,18 @@ export class Renderer {
     muted: boolean,
     canResume: boolean,
   ): void {
-    const labels: (HTMLImageElement | string)[] = [
-      this.assets.ui.startNew,
-      "Resume Game",
-      this.assets.ui.loadStage,
-      this.assets.ui.toggleSound,
-      this.assets.ui.credits,
-    ];
-    labels.forEach((img, i) => {
+    const labels = ["Start New Game", "Resume Game", "Load Stage", "Toggle Sound", "Credits"];
+    labels.forEach((label, i) => {
       const y = originY + i * MENU_GAP;
       const active = i === selected || i === hover;
       const dim = i === 1 && !canResume;
       this.ctx.save();
-      this.ctx.globalAlpha = dim ? 0.32 : active ? 1 : 0.9;
-      if (active && !dim) {
-        this.ctx.fillStyle = "#fff8e0";
-        this.ctx.shadowColor = "#c05018";
-        this.ctx.shadowBlur = 8;
-        this.ctx.font = "16px Trebuchet MS, Verdana, sans-serif";
-        this.ctx.fillText(">", MENU_X - 16, y + 16);
-      }
-      if (typeof img === "string") this.drawGlowLabel(img, MENU_X + 4, y + 16);
-      else this.ctx.drawImage(this.knocked(img), MENU_X, y);
-      if (i === 3) {
-        this.drawGlowLabel(muted ? "Off" : "On", MENU_X + 148, y + 16);
-      }
+      this.ctx.globalAlpha = dim ? 0.32 : 1;
+      if (active && !dim) this.drawUiText(">", MENU_X - 16, y + 16, { size: 15, glow: true });
+      this.drawUiText(label, MENU_X + 4, y + 16, { size: 15, glow: true });
+      if (i === 3) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 15, glow: true });
       this.ctx.restore();
     });
-  }
-
-  private drawGlowLabel(text: string, x: number, y: number): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.font = "bold 15px Trebuchet MS, Verdana, sans-serif";
-    ctx.textAlign = "left";
-    ctx.shadowColor = "#c04010";
-    ctx.shadowBlur = 12;
-    ctx.fillStyle = "#ffb060";
-    ctx.fillText(text, x, y);
-    ctx.shadowBlur = 4;
-    ctx.fillStyle = "#fff8e8";
-    ctx.fillText(text, x, y);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(text, x, y);
-    ctx.restore();
   }
 
   drawSpinBlock(frame: number, x: number, y: number): void {
@@ -673,9 +717,11 @@ export class Renderer {
     const opts = ["Yes", "No"];
     opts.forEach((label, i) => {
       const y = 214 + i * 26;
-      ctx.fillStyle = i === selected ? "#fff4d6" : "#c8b8a0";
-      ctx.textAlign = "left";
-      ctx.fillText(i === selected ? `> ${label}` : `  ${label}`, 210, y);
+      this.drawUiText(i === selected ? `> ${label}` : `  ${label}`, 210, y, {
+        size: 15,
+        glow: true,
+        color: i === selected ? "#fff4d6" : "#c8b8a0",
+      });
     });
     ctx.restore();
   }
@@ -709,7 +755,7 @@ export class Renderer {
   hitMenu(mx: number, my: number, originY: number, count: number): number | null {
     for (let i = 0; i < count; i++) {
       const y = originY + i * MENU_GAP;
-      if (mx >= MENU_X - 20 && mx <= MENU_X + 180 && my >= y && my <= y + 24) return i;
+      if (mx >= MENU_X - 20 && mx <= MENU_X + 220 && my >= y && my <= y + 24) return i;
     }
     return null;
   }
@@ -721,12 +767,11 @@ export class Renderer {
     return null;
   }
 
+  drawUiPrompt(text: string, x: number, y: number): void {
+    this.drawUiText(text, x, y, { size: 14, glow: true, color: "#ffc37a" });
+  }
+
   drawCredits(): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.fillStyle = "#e8dcc8";
-    ctx.font = "15px Trebuchet MS, sans-serif";
-    ctx.textAlign = "center";
     const lines = [
       "Credits",
       "Original game created by Damien Clarke,",
@@ -736,10 +781,13 @@ export class Renderer {
       "Click or press any key to return.",
     ];
     lines.forEach((line, i) => {
-      ctx.font = i === 0 ? "18px Trebuchet MS, sans-serif" : "13px Trebuchet MS, sans-serif";
-      ctx.fillText(line, STAGE_W / 2, 210 + i * 22);
+      this.drawUiText(line, STAGE_W / 2, 210 + i * 22, {
+        size: i === 0 ? 18 : 13,
+        glow: true,
+        align: "center",
+        weight: i === 0 ? "700" : "500",
+      });
     });
-    ctx.restore();
   }
 
   drawLoad(code: string, cursor: number, invalid: boolean): void {
@@ -769,12 +817,7 @@ export class Renderer {
     });
     ctx.drawImage(this.knocked(this.assets.ui.enter), STAGE_W / 2 - 40, 286);
     ctx.drawImage(this.knocked(this.assets.ui.backMenu), 24, STAGE_H - 36);
-    if (invalid) {
-      ctx.fillStyle = "#ff6a55";
-      ctx.font = "14px Trebuchet MS, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("INVALID CODE", STAGE_W / 2, 338);
-    }
+    if (invalid) this.drawUiText("INVALID CODE", STAGE_W / 2, 338, { size: 14, glow: true, align: "center", color: "#ff6a55" });
     ctx.restore();
   }
 
@@ -811,34 +854,20 @@ export class Renderer {
     ctx.fillStyle = "#000";
     ctx.fillRect(28, 138, 236, 128);
     ctx.fillRect(300, 154, 220, 100);
-    const opts: (HTMLImageElement | string)[] = [
-      this.assets.ui.returnGame,
-      this.assets.ui.toggleSound,
-      this.assets.ui.quitMenu,
-    ];
-    opts.forEach((img, i) => {
-      const y = 154 + i * 32;
+    const opts = ["Return to Game", "Toggle Sound", "Quit to Menu"];
+    opts.forEach((label, i) => {
+      const y = 178 + i * 32;
       const active = i === selected;
-      ctx.save();
-      ctx.globalAlpha = active ? 1 : 0.9;
-      if (active) {
-        ctx.fillStyle = "#fff8e0";
-        ctx.shadowColor = "#c05018";
-        ctx.shadowBlur = 8;
-        ctx.font = "16px Trebuchet MS, Verdana, sans-serif";
-        ctx.fillText(">", 36, y + 16);
-      }
-      if (typeof img === "string") this.drawGlowLabel(img, 56, y + 16);
-      else ctx.drawImage(this.knocked(img), 54, y);
-      if (i === 1) this.drawGlowLabel(muted ? "Off" : "On", 196, y + 16);
-      ctx.restore();
+      if (active) this.drawUiText(">", 36, y, { size: 15, glow: true });
+      this.drawUiText(label, 56, y, { size: 15, glow: true });
+      if (i === 1) this.drawUiText(muted ? "Off" : "On", 210, y, { size: 15, glow: true });
     });
-    ctx.drawImage(this.knocked(this.assets.ui.pauseStats), 318, 164);
-    ctx.fillStyle = "#000";
-    ctx.fillRect(418, 164, 96, 72);
-    this.drawGlowLabel(time, 430, 186);
-    this.drawGlowLabel(String(stage + 1).padStart(2, "0"), 430, 210);
-    this.drawGlowLabel(String(attempts), 430, 234);
+    this.drawUiText("Time:", 318, 186, { size: 14, glow: true });
+    this.drawUiText("Stage:", 318, 210, { size: 14, glow: true });
+    this.drawUiText("Attempts:", 318, 234, { size: 14, glow: true });
+    this.drawUiText(time, 504, 186, { size: 14, glow: true, align: "right" });
+    this.drawUiText(String(stage + 1).padStart(2, "0"), 504, 210, { size: 14, glow: true, align: "right" });
+    this.drawUiText(String(attempts), 504, 234, { size: 14, glow: true, align: "right" });
     ctx.restore();
   }
 
@@ -846,23 +875,14 @@ export class Renderer {
     const ctx = this.ctx;
     this.drawBg("menu");
     ctx.drawImage(this.assets.ui.congrats, 24, 70, 501, 43);
-    ctx.save();
-    ctx.fillStyle = "#e8dcc8";
-    ctx.font = "14px Trebuchet MS, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("You completed the 33 stages of Bloxorz!", STAGE_W / 2, 150);
-    ctx.textAlign = "right";
-    ctx.fillText("Moves Taken:", STAGE_W / 2 + 20, 200);
-    ctx.fillText("Time Taken:", STAGE_W / 2 + 20, 224);
-    ctx.fillText("Failed Attempts:", STAGE_W / 2 + 20, 248);
-    ctx.textAlign = "left";
-    ctx.fillText(String(moves), STAGE_W / 2 + 32, 200);
-    ctx.fillText(time, STAGE_W / 2 + 32, 224);
-    ctx.fillText(String(fails), STAGE_W / 2 + 32, 248);
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#ffb060";
-    ctx.fillText("Press Enter or click to return to the menu", STAGE_W / 2, 310);
-    ctx.restore();
+    this.drawUiText("You completed the 33 stages of Bloxorz!", STAGE_W / 2, 150, { size: 14, glow: true, align: "center" });
+    this.drawUiText("Moves Taken:", STAGE_W / 2 + 20, 200, { size: 14, glow: true, align: "right" });
+    this.drawUiText("Time Taken:", STAGE_W / 2 + 20, 224, { size: 14, glow: true, align: "right" });
+    this.drawUiText("Failed Attempts:", STAGE_W / 2 + 20, 248, { size: 14, glow: true, align: "right" });
+    this.drawUiText(String(moves), STAGE_W / 2 + 32, 200, { size: 14, glow: true });
+    this.drawUiText(time, STAGE_W / 2 + 32, 224, { size: 14, glow: true });
+    this.drawUiText(String(fails), STAGE_W / 2 + 32, 248, { size: 14, glow: true });
+    this.drawUiText("Press Enter or click to return to the menu", STAGE_W / 2, 310, { size: 13, glow: true, align: "center", color: "#ffb060" });
   }
 
   menuHitLogoArea(): void {

@@ -39,7 +39,7 @@ let glitchX = 0;
 let sessionMoves = 0;
 let sessionFails = 0;
 let sessionStart = 0;
-let pendingResult: "ok" | "fail" | "win" | "split" | "assemble" | null = null;
+let pendingResult: "ok" | "fail" | "win" | "split" | "assemble" | "scatter" | null = null;
 let busy = false;
 let splashT = 0;
 let askIndex = 0;
@@ -330,8 +330,9 @@ function tryLoad(): void {
 function chooseMenu(i: number): void {
   sound.play("click");
   if (i === 0) {
-    askIndex = 0;
-    screen = "ask";
+    tutorialSlide = 0;
+    tutorialOffset = 18;
+    screen = "tutorial";
   } else if (i === 1) {
     if (resumeAt === null) return;
     startSession();
@@ -415,7 +416,6 @@ function unlock(): void {
   sound.unlock();
   screen = "author";
   splashT = 0;
-  sound.play("splash", { volume: 0.9 });
 }
 
 function advanceSplash(): void {
@@ -573,8 +573,15 @@ function update(dt: number): void {
         enterPlay();
       } else if (kind === "sink" && pendingResult === "win") {
         stage.anim = null;
-        beginLevel(levelIndex + 1, true);
+        stage.beginScatter();
+        pendingResult = "scatter";
+        busy = true;
+        sound.play("whoosh", { volume: 0.85 });
       }
+    }
+    if (pendingResult === "scatter" && stage.scatter >= 1) {
+      pendingResult = null;
+      beginLevel(levelIndex + 1, true);
     }
   }
 
@@ -589,12 +596,7 @@ function draw(): void {
   if (screen === "boot") {
     renderer.drawBg("menu");
     renderer.drawLogo(5, 36, 52);
-    renderer.ctx.save();
-    renderer.ctx.fillStyle = "#ffc37a";
-    renderer.ctx.font = "16px Trebuchet MS, sans-serif";
-    renderer.ctx.textAlign = "left";
-    renderer.ctx.fillText("Click or press any key to start", 42, 300);
-    renderer.ctx.restore();
+    renderer.drawUiPrompt("Click or press any key to start", 42, 300);
     return;
   }
 
@@ -653,6 +655,10 @@ function draw(): void {
 }
 
 async function boot(): Promise<void> {
+  await Promise.all([
+    document.fonts.load("700 15px Orbitron"),
+    document.fonts.load("500 13px Orbitron"),
+  ]).catch(() => undefined);
   const assets = await loadAssets();
   renderer = new Renderer(canvas, assets);
   canvas.tabIndex = 0;

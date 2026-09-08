@@ -169,6 +169,7 @@ export class Stage {
   won = false;
   failed = false;
   assemble = 1;
+  scatter = 0;
 
   constructor(def: LevelDef) {
     this.def = def;
@@ -296,6 +297,11 @@ export class Stage {
     };
   }
 
+  beginScatter(): void {
+    this.scatter = 0.001;
+    this.anim = null;
+  }
+
   beginSink(): void {
     this.anim = {
       kind: "sink",
@@ -384,6 +390,7 @@ export class Stage {
     }
     if (this.selectTimer > 0) this.selectTimer = Math.max(0, this.selectTimer - dt);
     if (this.assemble < 1) this.assemble = Math.min(1, this.assemble + dt / 1.25);
+    if (this.scatter > 0 && this.scatter < 1) this.scatter = Math.min(1, this.scatter + dt / 0.85);
     if (this.anim) {
       this.anim.t += dt;
       if (this.anim.t >= this.anim.dur) this.anim.t = this.anim.dur;
