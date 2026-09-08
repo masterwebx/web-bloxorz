@@ -1,7 +1,7 @@
 const SPRITE_FILES = [
   "block", "bridge", "highlight", "bracket",
   "bg1", "level_gradient_bg", "text", "numbers",
-  "pause_menu_bg", "nostabyte",
+  "pause_menu_bg", "nostabyte", "font",
   ...Array.from({ length: 9 }, (_, i) => `tutorial_bg_${i + 1}`),
   ...Array.from({ length: 33 }, (_, i) => `level_${i + 1}`),
 ];
@@ -68,10 +68,11 @@ export function drawSpriteFrame(ctx, sheet, frame, x, y, flipX = false) {
   ctx.restore();
 }
 
-export function drawBg(ctx, img, x, y, alpha = 1) {
+/** Draw a 256x256 background centered at (cx, cy) in GBA coords. */
+export function drawBgCentered(ctx, img, cx, cy, alpha = 1) {
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.drawImage(img, x, y);
+  ctx.drawImage(img, cx - 128, cy - 128);
   ctx.restore();
 }
 

@@ -60,10 +60,11 @@ export class LevelScene {
 
   start(levelIndex = 0) {
     this.currentLevelIndex = levelIndex;
-    this.movesCount = 0;
-    this.attemptsCount = 0;
-    this.failedCount = 0;
-    this.timerStart = Date.now();
+    if (levelIndex === 0) {
+      this.movesCount = 0;
+      this.failedCount = 0;
+      this.timerStart = Date.now();
+    }
     this.loadLevel(levelIndex, true);
   }
 
@@ -128,6 +129,13 @@ export class LevelScene {
     }
 
     if (this.state === "title") {
+      if (this.keys["Space"] || this.keys["Enter"]) {
+        this.keys["Space"] = false;
+        this.keys["Enter"] = false;
+        this.state = "drop_in";
+        this.fallAnimTimer = 0;
+        return null;
+      }
       this.titleTimer--;
       if (this.titleTimer <= 0) {
         this.state = "drop_in";
@@ -149,11 +157,11 @@ export class LevelScene {
     }
 
     if (this.state === "animating") {
-      const done1 = this.blockPlayer.update();
+      const finished = this.blockPlayer.update();
       if (this.isSplit && this.block2Player) {
         this.block2Player.update();
       }
-      if (done1 || this.blockPlayer.done) {
+      if (finished) {
         this.afterMove();
       }
       return null;
@@ -337,6 +345,8 @@ export class LevelScene {
   }
 
   afterMove() {
+    if (this.state !== "animating") return;
+
     const level = this.getLevel();
 
     if (!this.isSplit && this.blockOrientation === ORIENTATION.UP && pointsEqual(this.blockPos, this.endTilePos)) {

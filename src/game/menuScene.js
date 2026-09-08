@@ -1,4 +1,4 @@
-import { INVALID_CODE_FRAMES, TUTORIAL_PAGES } from "./constants.js";
+import { INVALID_CODE_FRAMES } from "./constants.js";
 import { blockTileToScreenPos } from "./helpers.js";
 import { AnimationPlayer } from "./animation.js";
 import { ANIM } from "./constants.js";
@@ -18,13 +18,15 @@ export class MenuScene {
     this.invalidCodeTimer = 0;
     this.logoYOffset = 0;
     this.frame = 0;
+    this.logoFrame = 0;
+    this.bgAlpha = 0.25;
 
-    this.blockPos = { x: 8, y: 4 };
+    this.blockPos = { x: 17, y: 7 };
     this.blockPlayer = new AnimationPlayer();
     this.blockPlayer.setAnimation(ANIM.BLOCK_UP);
     this.blockPlayer.frameTime = 2;
 
-    this.splashTimer = 120;
+    this.splashTimer = 90;
     this.state = "splash";
 
     this.keys = {};
@@ -54,6 +56,15 @@ export class MenuScene {
     if (this.state === "tutorial") {
       return this.updateTutorial();
     }
+
+    this.frame++;
+    this.logoFrame = Math.floor(this.frame / 15) % 6;
+
+    // Pulsing bg fade like the GBA menu
+    const pulse = this.frame % 300;
+    this.bgAlpha = pulse >= 150
+      ? 0.25 + (pulse - 150) / 150 * 0.75
+      : 0.25 + (1 - pulse / 150) * 0.75;
 
     this.updateBlockAnimation();
 
@@ -87,18 +98,19 @@ export class MenuScene {
       this.audio.play("click");
 
       if (this.selectedItem === 0) {
-        this.state = "tutorial";
-        this.tutorialPage = 0;
-        return null;
+        this.startLevel = 0;
+        return "level";
       }
       if (this.selectedItem === 1) {
         this.screen = "load";
         this.enteredCode = 0;
         this.selectedDigit = 0;
+        this.logoYOffset = -12;
         return null;
       }
       if (this.selectedItem === 2) {
         this.screen = "credits";
+        this.logoYOffset = -24;
         return null;
       }
     }
@@ -116,14 +128,12 @@ export class MenuScene {
       this.audio.play("hover");
     } else if (this.keys["ArrowUp"]) {
       const digit = Math.floor(this.enteredCode / Math.pow(10, 5 - this.selectedDigit)) % 10;
-      const newDigit = (digit + 1) % 10;
-      this.enteredCode = this.setDigit(this.enteredCode, this.selectedDigit, newDigit);
+      this.enteredCode = this.setDigit(this.enteredCode, this.selectedDigit, (digit + 1) % 10);
       this.keys["ArrowUp"] = false;
       this.audio.play("hover");
     } else if (this.keys["ArrowDown"]) {
       const digit = Math.floor(this.enteredCode / Math.pow(10, 5 - this.selectedDigit)) % 10;
-      const newDigit = (digit + 9) % 10;
-      this.enteredCode = this.setDigit(this.enteredCode, this.selectedDigit, newDigit);
+      this.enteredCode = this.setDigit(this.enteredCode, this.selectedDigit, (digit + 9) % 10);
       this.keys["ArrowDown"] = false;
       this.audio.play("hover");
     } else if (this.keys["Enter"] || this.keys["Space"]) {
@@ -140,6 +150,7 @@ export class MenuScene {
     } else if (this.keys["Escape"]) {
       this.keys["Escape"] = false;
       this.screen = "main";
+      this.logoYOffset = 0;
       this.audio.play("click");
     }
     return null;
@@ -158,65 +169,50 @@ export class MenuScene {
       this.keys["Enter"] = false;
       this.keys["Space"] = false;
       this.screen = "main";
+      this.logoYOffset = 0;
       this.audio.play("click");
     }
     return null;
   }
 
   updateTutorial() {
-    if (this.keys["Space"] || this.keys["Enter"] || this.keys["ArrowRight"]) {
-      this.keys["Space"] = false;
-      this.keys["Enter"] = false;
-      this.keys["ArrowRight"] = false;
-      this.tutorialPage++;
-      this.audio.play("click");
-      if (this.tutorialPage >= TUTORIAL_PAGES.length) {
-        this.startLevel = 0;
-        return "level";
-      }
-    } else if (this.keys["ArrowLeft"] && this.tutorialPage > 0) {
-      this.tutorialPage--;
-      this.keys["ArrowLeft"] = false;
-      this.audio.play("hover");
-    } else if (this.keys["Escape"]) {
-      this.state = "menu";
+    if (this.keys["Escape"]) {
+      this.startLevel = 0;
       this.keys["Escape"] = false;
+      return "level";
     }
     return null;
   }
 
   updateBlockAnimation() {
-    const moveFrames = this.blockPlayer.frameTime * 9;
-    this.frame++;
+    const moveFrames = this.blockPlayer.frameTime * 8;
+    const cycle = moveFrames * 6;
+    const f = this.frame % cycle;
 
-    const seq = [
-      [ANIM.BLOCK_UP_MOVE_LEFT, null],
-      [null, { x: -2, y: 0 }],
-      [ANIM.BLOCK_RIGHT_MOVE_FORWARD, null],
-      [null, { x: 0, y: -1 }],
-      [ANIM.BLOCK_RIGHT_MOVE_LEFT, null],
-      [null, { x: -1, y: 0 }],
-    ];
+    if (f === 0) this.blockPlayer.setAnimation(ANIM.BLOCK_UP_MOVE_LEFT);
+    else if (f === moveFrames - 1) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
+      this.blockPos.x -= 2;
+    } else if (f === moveFrames) this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_FORWARD);
+    else if (f === moveFrames * 2 - 1) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
+      this.blockPos.y -= 1;
+    } else if (f === moveFrames * 2) this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT_MOVE_LEFT);
+    else if (f === moveFrames * 3 - 1) {
+      this.blockPlayer.setAnimation(ANIM.BLOCK_UP);
+      this.blockPos.x -= 1;
+    }
 
-    const cycleLen = moveFrames * seq.length;
-    const phase = this.frame % cycleLen;
-    const step = Math.floor(phase / moveFrames);
-    const sub = phase % moveFrames;
-
-    if (sub === 0 && seq[step][0]) {
-      this.blockPlayer.setAnimation(seq[step][0]);
+    if (f < moveFrames * 4) {
       this.blockPlayer.playUntilDone();
     }
-    if (sub === moveFrames - 1 && seq[step][1]) {
-      this.blockPos.x += seq[step][1].x;
-      this.blockPos.y += seq[step][1].y;
-      if (step === 1) this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
-      if (step === 3) this.blockPlayer.setAnimation(ANIM.BLOCK_RIGHT);
-      if (step === 5) this.blockPlayer.setAnimation(ANIM.BLOCK_UP);
-    }
-
     this.blockPlayer.update();
-    this.blockPlayer.basePosition = blockTileToScreenPos(this.blockPos);
+
+    const screen = blockTileToScreenPos(this.blockPos);
+    this.blockPlayer.basePosition = {
+      x: screen.x + 6,
+      y: screen.y + 6 + this.logoYOffset,
+    };
   }
 
   draw() {
@@ -229,19 +225,12 @@ export class MenuScene {
       return;
     }
 
-    if (this.state === "tutorial") {
-      this.renderer.drawTutorial(this.tutorialPage);
-      this.renderer.drawTutorialText(
-        TUTORIAL_PAGES[this.tutorialPage],
-        this.tutorialPage,
-        TUTORIAL_PAGES.length
-      );
-      this.renderer.endFrame();
-      return;
-    }
-
-    this.renderer.drawMenuBg();
-    this.renderer.drawLogo(60, 96 - 80, 1);
+    this.renderer.drawMenuBg(this.bgAlpha);
+    this.renderer.drawAnimatedLogo(
+      this.logoFrame,
+      58,
+      90 - this.logoFrame * 20 + this.logoYOffset
+    );
     this.renderer.drawBlock(this.blockPlayer);
 
     if (this.screen === "main") {
@@ -251,10 +240,10 @@ export class MenuScene {
     } else if (this.screen === "credits") {
       this.renderer.drawCredits([
         "Credits",
-        "Original game created by Damien Clarke,",
-        "DX Interactive, 21st June 2007.",
-        "HTML remake based on GBA port by",
-        "Jacob Coughenour, Nostabyte Interactive.",
+        "Original game by Damien Clarke,",
+        "DX Interactive, 2007.",
+        "GBA port by Jacob Coughenour.",
+        "HTML remake, 2026.",
       ], this.logoYOffset);
     }
 

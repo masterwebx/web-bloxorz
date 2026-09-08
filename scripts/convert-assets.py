@@ -12,7 +12,25 @@ SPRITE_BMPS = [
     "block.bmp", "bridge.bmp", "highlight.bmp", "bracket.bmp",
     "bg1.bmp", "level_gradient_bg.bmp", "text.bmp", "numbers.bmp",
     "pause_menu_bg.bmp", "nostabyte.bmp",
+    "common_variable_8x8_font.png",
 ] + [f"tutorial_bg_{i}.bmp" for i in range(1, 10)] + [f"level_{i}.bmp" for i in range(1, 34)]
+
+
+def convert_font(src_dir: Path, dst_dir: Path):
+    src = src_dir / "common_variable_8x8_font.png"
+    if not src.exists():
+        return
+    img = Image.open(src).convert("RGBA")
+    datas = img.getdata()
+    new_data = []
+    for item in datas:
+        if item[0] == 0 and item[1] == 255 and item[2] == 0:
+            new_data.append((0, 0, 0, 0))
+        else:
+            new_data.append(item)
+    img.putdata(new_data)
+    img.save(dst_dir / "font.png")
+    print("converted font -> font.png")
 
 
 def bmp_to_png(name: str, src_dir: Path, dst_dir: Path):
@@ -46,6 +64,8 @@ def main():
 
     for name in SPRITE_BMPS:
         bmp_to_png(name, GBA_ROOT / "graphics", sprites_dir)
+
+    convert_font(GBA_ROOT / "graphics", sprites_dir)
 
     for wav in (GBA_ROOT / "audio").glob("*.wav"):
         shutil.copy2(wav, audio_dir / wav.name)

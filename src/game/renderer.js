@@ -4,17 +4,25 @@ import {
   GBA_W,
   GBA_H,
   SCALE,
-  TILE,
   SPLIT_HIGHLIGHT_FRAMES,
 } from "./constants.js";
 import { blockTileToScreenPos, bridgeTileToScreenPos, padNumber } from "./helpers.js";
-import { drawSpriteFrame, drawBg, drawDigit } from "./assets.js";
+import { drawSpriteFrame, drawBgCentered, drawDigit } from "./assets.js";
+import {
+  PixelFont,
+  CURSOR_GLYPH,
+  drawLogoFrame,
+  drawTextBanner,
+  TEXT_STAGE_Y,
+  TEXT_CONGRATS_Y,
+} from "./font.js";
 
 export class Renderer {
   constructor(ctx, sprites) {
     this.ctx = ctx;
     this.sprites = sprites;
     this.mosaic = 0;
+    this.font = new PixelFont(sprites.font);
   }
 
   clear() {
@@ -40,33 +48,36 @@ export class Renderer {
   }
 
   drawGradientBg() {
-    drawBg(this.ctx, this.sprites.level_gradient_bg, -120 + 8, -80 + 48);
+    drawBgCentered(this.ctx, this.sprites.level_gradient_bg, 8, 48);
   }
 
   drawLevelBg(levelNumber) {
     const img = this.sprites[`level_${levelNumber}`];
-    if (img) drawBg(this.ctx, img, -128, -128);
+    if (img) drawBgCentered(this.ctx, img, 0, 0);
   }
 
-  drawMenuBg() {
-    drawBg(this.ctx, this.sprites.bg1, -120, -80 + 48);
+  drawMenuBg(alpha = 1) {
+    drawBgCentered(this.ctx, this.sprites.bg1, 0, 48, alpha);
   }
 
-  drawLogo(x, y, alpha = 1) {
-    drawBg(this.ctx, this.sprites.text, x - 44, y - 24, alpha);
+  drawAnimatedLogo(frame, x, y, alpha = 1) {
+    this.ctx.save();
+    this.ctx.globalAlpha = alpha;
+    drawLogoFrame(this.ctx, this.sprites.text, frame, x, y);
+    this.ctx.restore();
   }
 
   drawPauseBg() {
-    drawBg(this.ctx, this.sprites.pause_menu_bg, -120, -80);
+    drawBgCentered(this.ctx, this.sprites.pause_menu_bg, 0, 0);
   }
 
   drawSplash() {
-    drawBg(this.ctx, this.sprites.nostabyte, -120, -80 + 48);
+    drawBgCentered(this.ctx, this.sprites.nostabyte, 0, 48);
   }
 
   drawTutorial(page) {
     const img = this.sprites[`tutorial_bg_${page + 1}`];
-    if (img) drawBg(this.ctx, img, -128, -128);
+    if (img) drawBgCentered(this.ctx, img, 0, 0);
   }
 
   drawBridges(bridges) {
@@ -80,9 +91,13 @@ export class Renderer {
       drawSpriteFrame(this.ctx, this.sprites.bridge, frame, sx, sy);
 
       if (b.highlightTimer > 0) {
-        const hx = pos.x + 3;
-        const hy = pos.y - 3;
-        drawSpriteFrame(this.ctx, this.sprites.highlight, b.state ? 1 : 0, hx, hy);
+        drawSpriteFrame(
+          this.ctx,
+          this.sprites.highlight,
+          b.state ? 1 : 0,
+          pos.x + 3,
+          pos.y - 3
+        );
       }
     }
   }
@@ -106,134 +121,77 @@ export class Renderer {
   }
 
   drawHud(code, moves) {
-    this.ctx.save();
-    this.ctx.font = "8px monospace";
-    this.ctx.fillStyle = "#fff";
-    this.ctx.textAlign = "right";
-    this.ctx.fillText(`CODE ${padNumber(code, 6, "0")}`, 118, -74 + 80);
-    this.ctx.fillText(`MOVES ${padNumber(moves, 6, " ")}`, 118, -66 + 80);
-    this.ctx.restore();
+    this.font.drawText(this.ctx, `CODE ${padNumber(code, 6, "0")}`, 118, -70, "right");
+    this.font.drawText(this.ctx, `MOVES ${padNumber(moves, 6, " ")}`, 118, -60, "right");
   }
 
   drawTitleCard(levelNumber, alpha) {
     this.ctx.save();
     this.ctx.globalAlpha = alpha;
-    drawBg(this.ctx, this.sprites.text, 128 - 44 - 120, -24);
+    drawTextBanner(this.ctx, this.sprites.text, TEXT_STAGE_Y, 84, 0, 90, 18);
     const d1 = Math.floor(levelNumber / 10) % 10;
     const d2 = levelNumber % 10;
-    drawDigit(this.ctx, this.sprites.numbers, d1, 21 - 120, 0);
-    drawDigit(this.ctx, this.sprites.numbers, d2, 33 - 120, 0);
+    drawDigit(this.ctx, this.sprites.numbers, d1, 21, -4);
+    drawDigit(this.ctx, this.sprites.numbers, d2, 33, -4);
     this.ctx.restore();
   }
 
   drawMenuText(lines, selectedIndex, yOffset = 0) {
-    this.ctx.save();
-    this.ctx.font = "8px monospace";
-    this.ctx.fillStyle = "#fff";
-    this.ctx.textAlign = "left";
     lines.forEach((line, i) => {
-      const prefix = i === selectedIndex ? "> " : "  ";
-      this.ctx.fillText(prefix + line, -68, 10 + i * 10 + yOffset + 80);
+      const y = 10 + i * 10 + yOffset;
+      if (i === selectedIndex) {
+        this.font.drawGlyph(this.ctx, CURSOR_GLYPH, -74, y - 6);
+      }
+      this.font.drawText(this.ctx, line, -68, y - 6);
     });
-    this.ctx.textAlign = "right";
-    this.ctx.fillText("v1.0", 118, 74 + 80);
-    this.ctx.restore();
+    this.font.drawText(this.ctx, "v1.0", 118, 68, "right");
   }
 
   drawPasscode(code, selectedDigit, invalidTimer) {
-    this.ctx.save();
-    this.ctx.font = "8px monospace";
-    this.ctx.fillStyle = "#fff";
-    this.ctx.textAlign = "center";
-    this.ctx.fillText(padNumber(code, 6, "0"), 0, 28 + 80);
-    this.ctx.fillText("^", selectedDigit * 7 - 18, 9 + 28 + 80);
+    this.font.drawText(this.ctx, padNumber(code, 6, "0"), 0, 28, "center");
+    this.font.drawText(this.ctx, "^", selectedDigit * 8 - 20, 18, "center");
     if (invalidTimer > 0) {
-      this.ctx.fillText("INVALID CODE", 0, 23 + 28 + 80);
+      this.font.drawText(this.ctx, "INVALID CODE", 0, 14, "center");
     }
-    this.ctx.restore();
   }
 
   drawCredits(lines, yOffset = 0) {
-    this.ctx.save();
-    this.ctx.font = "8px monospace";
-    this.ctx.fillStyle = "#fff";
-    lines.forEach((line, i) => {
-      if (i === 0) {
-        this.ctx.textAlign = "left";
-        this.ctx.fillText(line, -68, 8 + yOffset + 80);
-      } else {
-        this.ctx.textAlign = "center";
-        const offset = i % 2 ? 2 : 0;
-        this.ctx.fillText(line, 0, 16 + i * 11 + yOffset + offset + 80);
-      }
-    });
-    this.ctx.restore();
+    if (lines.length > 0) {
+      this.font.drawText(this.ctx, lines[0], -68, 8 + yOffset - 6);
+    }
+    for (let i = 1; i < lines.length; i++) {
+      const offset = i % 2 ? 2 : 0;
+      this.font.drawText(this.ctx, lines[i], 0, 16 + i * 11 + yOffset + offset - 6, "center");
+    }
   }
 
   drawPauseMenu(option, stats) {
     this.drawPauseBg();
-    this.ctx.save();
-    this.ctx.font = "8px monospace";
-    this.ctx.fillStyle = "#fff";
-    this.ctx.textAlign = "left";
-    this.ctx.fillText((option === 0 ? "> " : "  ") + "Return to Game", -108, 30 + 80);
-    this.ctx.fillText((option === 1 ? "> " : "  ") + "Quit to Menu", -108, 40 + 80);
-    this.ctx.textAlign = "left";
-    this.ctx.fillText("Time", 16, 30 + 80);
-    this.ctx.fillText("Stage", 16, 40 + 80);
-    this.ctx.fillText("Attempts", 16, 50 + 80);
-    this.ctx.textAlign = "right";
-    this.ctx.fillText(stats.time, 102, 30 + 80);
-    this.ctx.fillText(stats.stage, 102, 40 + 80);
-    this.ctx.fillText(String(stats.attempts), 102, 50 + 80);
-    this.ctx.restore();
+    this.font.drawText(this.ctx, (option === 0 ? "> " : "  ") + "Return to Game", -108, 24);
+    this.font.drawText(this.ctx, (option === 1 ? "> " : "  ") + "Quit to Menu", -108, 34);
+    this.font.drawText(this.ctx, "Time", 16, 24);
+    this.font.drawText(this.ctx, "Stage", 16, 34);
+    this.font.drawText(this.ctx, "Attempts", 16, 44);
+    this.font.drawText(this.ctx, stats.time, 102, 24, "right");
+    this.font.drawText(this.ctx, stats.stage, 102, 34, "right");
+    this.font.drawText(this.ctx, String(stats.attempts), 102, 44, "right");
   }
 
   drawCongrats(stats) {
     this.drawMenuBg();
-    this.drawLogo(23, -12, 1);
-    this.ctx.save();
-    this.ctx.font = "8px monospace";
-    this.ctx.fillStyle = "#fff";
-    this.ctx.textAlign = "center";
-    this.ctx.fillText("You completed the 33 stages of Bloxorz!", 0, -1 + 80);
-    this.ctx.textAlign = "right";
-    this.ctx.fillText("Moves Taken:", -8, 18 + 80);
-    this.ctx.fillText("Time Taken:", -8, 27 + 80);
-    this.ctx.fillText("Failed Attempts:", -8, 36 + 80);
-    this.ctx.textAlign = "right";
-    this.ctx.fillText(String(stats.moves), 50, 18 + 80);
-    this.ctx.fillText(stats.time, 50, 27 + 80);
-    this.ctx.fillText(String(stats.failed), 50, 36 + 80);
-    this.ctx.textAlign = "center";
-    this.ctx.fillText("Press Space or Esc to return to menu", 0, 60 + 80);
-    this.ctx.restore();
+    drawTextBanner(this.ctx, this.sprites.text, TEXT_CONGRATS_Y, 0, -20, 170, 20);
+    this.font.drawText(this.ctx, "You completed all 33 stages!", 0, 0, "center");
+    this.font.drawText(this.ctx, "Moves Taken:", -8, 18, "right");
+    this.font.drawText(this.ctx, "Time Taken:", -8, 28, "right");
+    this.font.drawText(this.ctx, "Failed Attempts:", -8, 38, "right");
+    this.font.drawText(this.ctx, String(stats.moves), 50, 18, "right");
+    this.font.drawText(this.ctx, stats.time, 50, 28, "right");
+    this.font.drawText(this.ctx, String(stats.failed), 50, 38, "right");
+    this.font.drawText(this.ctx, "Space: menu", 0, 58, "center");
   }
 
   drawTutorialText(text, page, total) {
-    this.ctx.save();
-    this.ctx.font = "8px monospace";
-    this.ctx.fillStyle = "#fff";
-    this.ctx.textAlign = "center";
-    this.wrapText(text, 0, 60 + 80, 200, 10);
-    this.ctx.fillText(`${page + 1} / ${total}  —  Space: next`, 0, 72 + 80);
-    this.ctx.restore();
-  }
-
-  wrapText(text, x, y, maxWidth, lineHeight) {
-    const words = text.split(" ");
-    let line = "";
-    let cy = y;
-    for (const word of words) {
-      const test = line + word + " ";
-      if (this.ctx.measureText(test).width > maxWidth && line) {
-        this.ctx.fillText(line.trim(), x, cy);
-        line = word + " ";
-        cy += lineHeight;
-      } else {
-        line = test;
-      }
-    }
-    this.ctx.fillText(line.trim(), x, cy);
+    this.font.drawText(this.ctx, text, 0, 52, "center");
+    this.font.drawText(this.ctx, `${page + 1}/${total}  Space: next  Esc: skip`, 0, 68, "center");
   }
 }
