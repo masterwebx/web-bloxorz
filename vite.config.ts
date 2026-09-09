@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 
 const repo = process.env.GITHUB_REPOSITORY?.split("/")[1] ?? "web-bloxorz";
@@ -13,5 +14,9 @@ export default defineConfig({
     host: true,
     port: 4397,
     strictPort: true,
+  },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
   },
 });

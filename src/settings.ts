@@ -89,3 +89,7 @@ export function brandName(name: string): string {
   const stem = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "BLOX";
   return `${stem}ORZ`;
 }
+
+export function isDevName(name: string): boolean {
+  return name.trim().toUpperCase() === "DEV";
+}

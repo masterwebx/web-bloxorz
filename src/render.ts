@@ -769,8 +769,9 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawHud(code: string, moves: number, tab = "Menu", tabHot = false): void {
+  drawHud(code: string, moves: number, tab = "Menu", tabHot = false, showDev = false, devHot = false): void {
     this.drawMenuTab(tab, tabHot);
+    if (showDev) this.drawUiText("Dev Menu", 14, 42, { size: 13, color: "#111", hot: devHot });
     this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", color: "#111" });
     this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", color: "#111" });
   }
@@ -781,6 +782,10 @@ export class Renderer {
 
   hitMenuTab(mx: number, my: number, wide = false): boolean {
     return mx >= 8 && mx <= (wide ? 168 : 70) && my >= 6 && my <= 28;
+  }
+
+  hitDevTab(mx: number, my: number): boolean {
+    return mx >= 8 && mx <= 120 && my >= 30 && my <= 50;
   }
 
   drawTitle(title: string, alpha: number, shake: { x: number; y: number }, subtitle?: string): void {
@@ -1034,7 +1039,25 @@ export class Renderer {
     });
   }
 
-  drawLoad(code: string, cursor: number, invalid: boolean, hover: "enter" | "back" | null): void {
+  drawLoad(
+    code: string,
+    cursor: number,
+    invalid: boolean,
+    hover: "enter" | "back" | null,
+    dev?: { rows: string[]; selected: number; hover: number | null; backHot: boolean } | null,
+  ): void {
+    if (dev) {
+      this.drawStageList(
+        "Load Stage  (DEV)",
+        dev.rows,
+        dev.selected,
+        dev.hover,
+        "Enter jump   Esc back",
+        "No stages.",
+        dev.backHot,
+      );
+      return;
+    }
     const ctx = this.ctx;
     ctx.save();
     this.drawUiText("Type the passcode", STAGE_W / 2, 210, { size: 16, glow: true, align: "center" });
@@ -1146,6 +1169,51 @@ export class Renderer {
   hitPause(mx: number, my: number): number | null {
     if (mx < 28 || mx > 264 || my < 142 || my > 286) return null;
     return Math.max(0, Math.min(3, Math.floor((my - 142) / 32)));
+  }
+
+  drawDevMenu(
+    rows: string[],
+    selected: number,
+    hover: number | null,
+    footerHot: "next" | "prev" | "win" | "close" | null,
+  ): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, STAGE_W, STAGE_H);
+    ctx.restore();
+    this.drawUiText("Dev Menu", 42, 120, { size: 18 });
+    const start = listStart(rows.length, selected);
+    rows.slice(start, start + LIST_MAX).forEach((n, i) => {
+      const idx = start + i;
+      const y = 150 + i * LIST_GAP;
+      const hot = hover === idx || (hover === null && selected === idx);
+      if (idx === selected) this.drawUiText(">", 28, y, { size: 13, hot });
+      this.drawUiText(n, 48, y, { size: 13, hot });
+    });
+    this.drawUiText("Next", 42, 360, { size: 13, hot: footerHot === "next" });
+    this.drawUiText("Prev", 120, 360, { size: 13, hot: footerHot === "prev" });
+    this.drawUiText("Force Win", 200, 360, { size: 13, hot: footerHot === "win" });
+    this.drawUiText("Close", 42, 386, { size: 13, hot: footerHot === "close" });
+  }
+
+  hitDevMenuList(mx: number, my: number, count: number, selected: number): number | null {
+    if (mx < 24 || mx > 520) return null;
+    const start = listStart(count, selected);
+    const i = Math.floor((my - 138) / LIST_GAP);
+    if (i < 0 || i >= LIST_MAX) return null;
+    const idx = start + i;
+    if (idx < 0 || idx >= count) return null;
+    return idx;
+  }
+
+  hitDevMenuFooter(mx: number, my: number): "next" | "prev" | "win" | "close" | null {
+    if (my >= 372 && my <= 396 && mx >= 24 && mx < 140) return "close";
+    if (my < 344 || my > 372) return null;
+    if (mx >= 24 && mx < 100) return "next";
+    if (mx >= 100 && mx < 180) return "prev";
+    if (mx >= 180 && mx < 320) return "win";
+    return null;
   }
 
   drawSettingsPanel(

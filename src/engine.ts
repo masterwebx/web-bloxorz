@@ -398,14 +398,14 @@ export class Stage {
   }
 }
 
-function nextBridge(on: boolean, mode: SwitchMode): boolean {
+export function levelByCode(code: string): number {
+  return LEVELS.findIndex((l) => l.code === code);
+}
+
+export function nextBridge(on: boolean, mode: SwitchMode): boolean {
   if (mode === "on") return true;
   if (mode === "off") return false;
   return !on;
-}
-
-export function levelByCode(code: string): number {
-  return LEVELS.findIndex((l) => l.code === code);
 }
 
 export { LEVELS };
