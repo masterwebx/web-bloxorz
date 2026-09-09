@@ -21,6 +21,19 @@ import {
 } from "./customLevels";
 import { fetchOnlineStages } from "./community";
 import { LEVELS, Stage, levelByCode, type Dir } from "./engine";
+import {
+  GhostRunner,
+  ghostsForStage,
+  loadRuns,
+  loadSeeGhosts,
+  pushGhost,
+  saveRun,
+  saveSeeGhosts,
+  winningTape,
+  type LevelStat,
+  type RunRecord,
+  type TapeCmd,
+} from "./history";
 import { Input } from "./input";
 import { Renderer, fitCamera, formatTime, MENU_COUNT, MENU_Y, PAUSE_COUNT } from "./render";
 import { ACTION_LABEL, brandName, isDevName, loadSettings, saveSettings, type Action, type Settings } from "./settings";
@@ -39,6 +52,7 @@ type Screen =
   | "play"
   | "pause"
   | "complete"
+  | "history"
   | "settings"
   | "creatorHub"
   | "editor"
@@ -47,7 +61,7 @@ type Screen =
 
 type CreatorPage = "root" | "create" | "play" | "enterCode" | "offline" | "online" | "manage" | "packEdit";
 
-type PlayMode = "campaign" | "custom" | "editor-test";
+type PlayMode = "campaign" | "custom" | "editor-test" | "replay";
 
 const EDITOR_TOOLS = [
   { id: "erase", label: "Erase", ch: " " },
@@ -93,6 +107,25 @@ let glitchX = 0;
 let sessionMoves = 0;
 let sessionFails = 0;
 let sessionStart = 0;
+let sessionTimeMs = 0;
+let runLevels: LevelStat[] = [];
+let currentTape: TapeCmd[] = [];
+let levelTapes: LevelStat["tapes"] = [];
+let levelBeganAt = 0;
+let completeShowStats = false;
+let completeStatsIndex = 0;
+let historyView: "list" | "detail" = "list";
+let historyIndex = 0;
+let historyRuns: RunRecord[] = [];
+let historyRun: RunRecord | null = null;
+let seeGhosts = loadSeeGhosts();
+let replayCmds: TapeCmd[] = [];
+let replayI = 0;
+let replayStage = 0;
+let ghosts: GhostRunner[] = [];
+let historyId = "";
+let feedingReplay = false;
+let runFlushed = false;
 let pendingResult: "ok" | "fail" | "win" | "split" | "assemble" | "scatter" | null = null;
 let busy = false;
 let splashT = 0;
@@ -105,6 +138,7 @@ let currentTitle = "";
 let currentAuthor = "";
 let settingsIndex = 0;
 let settingsNameFocus = false;
+let settingsNameAtFocus = "";
 let creatorIndex = 0;
 let creatorPage: CreatorPage = "root";
 let draft: LevelDef = emptyDraft();
@@ -131,7 +165,7 @@ let customQueue: SavedStage[] = [];
 let customQueueIndex = 0;
 let customOrigin: CreatorPage = "offline";
 let nameDraft = "";
-type ExtraHover = "enter" | "back" | "play" | "test" | "skip" | "next" | "prev" | "tab" | "dev" | "save" | "name" | "win" | "close" | null;
+type ExtraHover = "enter" | "back" | "play" | "test" | "skip" | "next" | "prev" | "tab" | "dev" | "save" | "name" | "win" | "close" | "stats" | "ghosts" | null;
 let extraHover: ExtraHover = null;
 
 function now(): number {
@@ -142,6 +176,221 @@ function persist(): void {
   saveSettings(settings);
   sound.setMix(settings.sfx, settings.music);
   applyBrand();
+}
+
+function maybeDevUnlock(prev: string, next: string): void {
+  if (!isDevName(prev) && isDevName(next)) sound.playDevUnlock();
+}
+
+function beginNameEdit(): void {
+  settingsNameAtFocus = settings.playerName;
+  settingsNameFocus = true;
+}
+
+function endNameEdit(): void {
+  settingsNameFocus = false;
+  persist();
+  maybeDevUnlock(settingsNameAtFocus, settings.playerName);
+}
+
+function campaignRecording(): boolean {
+  return playMode === "campaign";
+}
+
+function recordCmd(cmd: TapeCmd): void {
+  if (!campaignRecording()) return;
+  currentTape.push(cmd);
+}
+
+function commitAttempt(won: boolean): void {
+  if (!campaignRecording()) return;
+  if (currentTape.length) {
+    pushGhost(levelIndex, currentTape);
+    levelTapes.push({ cmds: [...currentTape], won });
+  }
+  currentTape = [];
+}
+
+function newHistoryId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function saveCurrentRun(complete: boolean): void {
+  if (!runLevels.length) return;
+  saveRun({
+    id: historyId || newHistoryId(),
+    at: Date.now(),
+    player: player(),
+    totalTimeMs: sessionTimeMs || Math.max(0, now() - sessionStart),
+    totalMoves: sessionMoves,
+    fails: sessionFails,
+    complete,
+    levels: runLevels,
+  });
+  runFlushed = true;
+}
+
+function recordWonLevel(): void {
+  if (!campaignRecording() || !stage) return;
+  commitAttempt(true);
+  runLevels.push({
+    stage: levelIndex,
+    timeMs: Math.max(0, now() - (levelBeganAt || sessionStart)),
+    moves: stage.moves,
+    attempts: stage.attempts,
+    tapes: [...levelTapes],
+  });
+  levelTapes = [];
+  levelBeganAt = 0;
+}
+
+function enterComplete(): void {
+  sessionTimeMs = now() - sessionStart;
+  saveCurrentRun(true);
+  completeShowStats = false;
+  completeStatsIndex = 0;
+  screen = "complete";
+  sound.stopAmbient();
+  sound.startMenu();
+}
+
+function openHistory(view: "list" | "detail" = "list"): void {
+  historyRuns = loadRuns();
+  historyView = view;
+  if (view === "list") {
+    historyIndex = Math.min(historyIndex, Math.max(0, historyRuns.length - 1));
+    historyRun = null;
+  }
+  screen = "history";
+  sound.startMenu();
+}
+
+function runLabel(run: RunRecord): string {
+  const d = new Date(run.at);
+  const when = `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+  const last = run.levels.at(-1)?.stage ?? 0;
+  const end = run.complete ? "All 33" : `Stage ${String(last + 1).padStart(2, "0")}`;
+  return `${when}  ·  ${end}  ·  ${formatTime(run.totalTimeMs)}`;
+}
+
+function levelStatLabel(stat: LevelStat): string {
+  const n = String(stat.stage + 1).padStart(2, "0");
+  return `${n}  ·  ${formatTime(stat.timeMs)}  ·  ${stat.moves} moves  ·  ${stat.attempts} deaths`;
+}
+
+function historyRows(): string[] {
+  if (historyView === "detail" && historyRun) return historyRun.levels.map(levelStatLabel);
+  return historyRuns.map(runLabel);
+}
+
+function startReplay(stageIndex: number, cmds: TapeCmd[]): void {
+  if (!cmds.length) return;
+  playMode = "replay";
+  replayCmds = cmds;
+  replayI = 0;
+  replayStage = stageIndex;
+  ghosts = [];
+  pendingResult = null;
+  busy = false;
+  const def = LEVELS[stageIndex];
+  currentDef = cloneDef(def);
+  currentTitle = `STAGE ${String(stageIndex + 1).padStart(2, "0")}`;
+  currentAuthor = "";
+  stage = new Stage(currentDef);
+  stage.assemble = 1;
+  renderer.cam = fitCamera(stage);
+  if (seeGhosts) {
+    ghosts = ghostsForStage(stageIndex, cmds).map((tape) => new GhostRunner(def, tape));
+  }
+  enterPlay();
+}
+
+function exitReplay(): void {
+  ghosts = [];
+  replayCmds = [];
+  playMode = "campaign";
+  stage = null;
+  currentDef = null;
+  sound.stopAmbient();
+  openHistory("detail");
+  sound.play("click");
+}
+
+function feedReplay(): void {
+  if (playMode !== "replay" || screen !== "play" || !stage || busy) return;
+  if (replayI >= replayCmds.length) return;
+  feedingReplay = true;
+  const cmd = replayCmds[replayI];
+  if (cmd === "swap") {
+    if (!stage.anim) {
+      stage.swapSplit();
+      replayI++;
+    }
+    feedingReplay = false;
+    return;
+  }
+  move(cmd);
+  if (busy || stage.anim) replayI++;
+  feedingReplay = false;
+}
+
+function leaveComplete(): void {
+  completeShowStats = false;
+  screen = "menu";
+  sound.play("click");
+  sound.startMenu();
+}
+
+function handleHistoryKey(e: KeyboardEvent): void {
+  const rows = historyRows();
+  if (backKey(e.key)) {
+    if (historyView === "detail") {
+      historyView = "list";
+      historyRun = null;
+      historyIndex = Math.min(historyIndex, Math.max(0, historyRuns.length - 1));
+    } else {
+      screen = "menu";
+    }
+    sound.play("click");
+    return;
+  }
+  if (e.key === "g" || e.key === "G") {
+    seeGhosts = !seeGhosts;
+    saveSeeGhosts(seeGhosts);
+    sound.play("click");
+    return;
+  }
+  if (!rows.length) return;
+  if (e.key === "ArrowDown") {
+    historyIndex = (historyIndex + 1) % rows.length;
+    sound.play("hover");
+  } else if (e.key === "ArrowUp") {
+    historyIndex = (historyIndex + rows.length - 1) % rows.length;
+    sound.play("hover");
+  } else if (confirmKey(e.key)) {
+    chooseHistory(historyIndex);
+  }
+}
+
+function chooseHistory(i: number): void {
+  if (historyView === "list") {
+    const run = historyRuns[i];
+    if (!run) return;
+    historyRun = run;
+    historyView = "detail";
+    historyIndex = 0;
+    sound.play("click");
+    return;
+  }
+  const level = historyRun?.levels[i];
+  if (!level) return;
+  const tape = winningTape(level);
+  if (!tape) {
+    sound.play("fail");
+    return;
+  }
+  sound.play("click");
+  startReplay(level.stage, tape);
 }
 
 function player(): string {
@@ -212,17 +461,23 @@ function cloneDef(def: LevelDef): LevelDef {
 }
 
 function startSession(): void {
+  if (runLevels.length && !runFlushed) saveCurrentRun(false);
+  runFlushed = false;
   sessionMoves = 0;
   sessionFails = 0;
   sessionStart = now();
+  sessionTimeMs = 0;
+  runLevels = [];
+  currentTape = [];
+  levelTapes = [];
+  levelBeganAt = 0;
+  historyId = newHistoryId();
 }
 
 function beginCampaign(index: number, withTitle: boolean): void {
   levelIndex = index;
   if (index >= LEVELS.length) {
-    screen = "complete";
-    sound.stopAmbient();
-    sound.startMenu();
+    enterComplete();
     return;
   }
   playMode = "campaign";
@@ -236,6 +491,11 @@ function beginFromDef(def: LevelDef, withTitle: boolean, title?: string, author?
   currentAuthor = author ?? "";
   stage = new Stage(currentDef);
   stage.assemble = 0;
+  if (playMode === "campaign") {
+    currentTape = [];
+    levelTapes = [];
+    levelBeganAt = 0;
+  }
   renderer.cam = fitCamera(stage);
   if (withTitle) {
     screen = "title";
@@ -252,6 +512,7 @@ function enterPlay(): void {
   screen = "play";
   canvas.focus();
   sound.startAmbient();
+  if (campaignRecording() && !levelBeganAt) levelBeganAt = now();
   if (stage.assemble < 1) {
     busy = true;
     pendingResult = "assemble";
@@ -273,10 +534,21 @@ function pointerPos(ev: MouseEvent | PointerEvent): { x: number; y: number } {
 
 function move(dir: Dir): void {
   if (screen !== "play" || !stage || busy) return;
+  if (playMode === "replay" && !feedingReplay) return;
   if (!stage.tryMove(dir)) return;
+  recordCmd(dir);
   input.rumble(90, 0.42, 0.62);
   busy = true;
   pendingResult = null;
+}
+
+function swapBlock(): void {
+  if (!stage || screen !== "play" || busy) return;
+  if (playMode === "replay" && !feedingReplay) return;
+  if (!stage.split) return;
+  stage.swapSplit();
+  recordCmd("swap");
+  sound.play("click", { volume: 0.5 });
 }
 
 function handlePlayResult(): void {
@@ -307,7 +579,7 @@ function handlePlayResult(): void {
   });
   sound.move(hollow);
 
-  sessionMoves += 1;
+  if (playMode !== "replay") sessionMoves += 1;
   if (result === "win") {
     sound.play("whoosh", { volume: 0.95 });
     input.rumble(220, 0.45, 0.4);
@@ -317,8 +589,10 @@ function handlePlayResult(): void {
     return;
   }
   if (result === "fail") {
-    sessionFails++;
-    stage.attempts++;
+    if (playMode !== "replay") {
+      sessionFails++;
+      stage.attempts++;
+    }
     sound.play("fail");
     input.rumble(340, 0.85, 0.7);
     stage.beginFall();
@@ -398,8 +672,10 @@ function onKey(e: KeyboardEvent): void {
   if (screen === "nameEntry") {
     if (e.key === "Enter") {
       if (nameDraft.trim()) {
+        const prev = settings.playerName;
         settings.playerName = nameDraft.trim();
         persist();
+        maybeDevUnlock(prev, settings.playerName);
         screen = "menu";
         sound.startMenu();
         sound.play("click");
@@ -533,11 +809,44 @@ function onKey(e: KeyboardEvent): void {
   }
 
   if (screen === "complete") {
-    if (confirmKey(e.key)) {
-      screen = "menu";
-      sound.play("click");
-      sound.startMenu();
+    if (e.key === "ArrowDown" && completeShowStats && runLevels.length) {
+      completeStatsIndex = (completeStatsIndex + 1) % runLevels.length;
+      sound.play("hover");
+      return;
     }
+    if (e.key === "ArrowUp" && completeShowStats && runLevels.length) {
+      completeStatsIndex = (completeStatsIndex + runLevels.length - 1) % runLevels.length;
+      sound.play("hover");
+      return;
+    }
+    if (confirmKey(e.key) || e.key === "s" || e.key === "S") {
+      if (!completeShowStats && (confirmKey(e.key) && e.key !== "s" && e.key !== "S")) {
+        leaveComplete();
+        return;
+      }
+      if (e.key === "s" || e.key === "S" || (completeShowStats && backKey(e.key))) {
+        completeShowStats = !completeShowStats;
+        sound.play("click");
+        return;
+      }
+      if (completeShowStats) {
+        completeShowStats = false;
+        sound.play("click");
+        return;
+      }
+      leaveComplete();
+    }
+    if (backKey(e.key)) {
+      if (completeShowStats) {
+        completeShowStats = false;
+        sound.play("click");
+      } else leaveComplete();
+    }
+    return;
+  }
+
+  if (screen === "history") {
+    handleHistoryKey(e);
     return;
   }
 
@@ -641,6 +950,16 @@ function onKey(e: KeyboardEvent): void {
   }
 
   if (screen === "play") {
+    if (playMode === "replay") {
+      if (e.key === "r" || e.key === "R") {
+        startReplay(replayStage, replayCmds);
+        return;
+      }
+      if (backKey(e.key) || matchesAction(e.key, "pause")) {
+        openPause();
+      }
+      return;
+    }
     const dir = keyDir(e.key);
     if (dir) {
       e.preventDefault();
@@ -649,8 +968,7 @@ function onKey(e: KeyboardEvent): void {
     }
     if (matchesAction(e.key, "swap") || e.key === " " || e.key === "Spacebar") {
       e.preventDefault();
-      stage?.swapSplit();
-      sound.play("click", { volume: 0.5 });
+      swapBlock();
       return;
     }
     if (e.key === "r" || e.key === "R") {
@@ -668,8 +986,7 @@ function handleSettingsKey(e: KeyboardEvent): void {
   const last = rows.length - 1;
   if (settingsNameFocus) {
     if (e.key === "Escape" || e.key === "Enter") {
-      settingsNameFocus = false;
-      persist();
+      endNameEdit();
       e.preventDefault();
       return;
     }
@@ -716,7 +1033,7 @@ function handleSettingsKey(e: KeyboardEvent): void {
       return;
     }
     if (settingsIndex === 0) {
-      settingsNameFocus = true;
+      beginNameEdit();
       sound.play("click");
       return;
     }
@@ -795,9 +1112,11 @@ function chooseMenu(i: number): void {
     creatorPage = "root";
     screen = "creatorHub";
   } else if (i === 4) {
+    openHistory("list");
+  } else if (i === 5) {
     settingsIndex = 0;
     screen = "settings";
-  } else if (i === 5) {
+  } else if (i === 6) {
     const muted = sound.toggleMute();
     if (!muted) sound.startMenu();
   } else {
@@ -837,6 +1156,11 @@ function choosePause(i: number): void {
     sound.play("click");
   } else {
     sound.play("click");
+    if (playMode === "replay") {
+      exitReplay();
+      return;
+    }
+    if (campaignRecording() && runLevels.length) saveCurrentRun(false);
     sound.startMenu();
     if (playMode === "editor-test") screen = "editor";
     else if (playMode === "custom") {
@@ -1239,8 +1563,20 @@ function tutorialBack(): void {
 
 function restartLevel(): void {
   if (!currentDef) return;
-  sessionFails++;
-  stage = new Stage(currentDef);
+  if (playMode === "replay") {
+    startReplay(replayStage, replayCmds);
+    return;
+  }
+  if (playMode === "campaign") {
+    sessionFails++;
+    commitAttempt(false);
+    const deaths = (stage?.attempts ?? 0) + 1;
+    stage = new Stage(currentDef);
+    stage.attempts = deaths;
+  } else {
+    sessionFails++;
+    stage = new Stage(currentDef);
+  }
   renderer.cam = fitCamera(stage);
   enterPlay();
 }
@@ -1262,6 +1598,10 @@ function advanceSplash(): void {
 }
 
 function afterWin(): void {
+  if (playMode === "replay") {
+    exitReplay();
+    return;
+  }
   if (playMode === "editor-test") {
     shareCode = encodeLevel(draft);
     saveChoice = 0;
@@ -1281,6 +1621,7 @@ function afterWin(): void {
     sound.startMenu();
     return;
   }
+  recordWonLevel();
   beginCampaign(levelIndex + 1, true);
 }
 
@@ -1339,6 +1680,30 @@ canvas.addEventListener("pointerdown", (e) => {
     if (hit === "enter") tryLoad();
     return;
   }
+  if (screen === "history") {
+    if (renderer.hitGhostsToggle(p.x, p.y)) {
+      seeGhosts = !seeGhosts;
+      saveSeeGhosts(seeGhosts);
+      sound.play("click");
+      return;
+    }
+    if (renderer.hitListBack(p.x, p.y)) {
+      if (historyView === "detail") {
+        historyView = "list";
+        historyRun = null;
+        historyIndex = Math.min(historyIndex, Math.max(0, historyRuns.length - 1));
+      } else screen = "menu";
+      sound.play("click");
+      return;
+    }
+    const rows = historyRows();
+    const hit = renderer.hitStageList(p.x, p.y, rows.length, historyIndex);
+    if (hit !== null) {
+      historyIndex = hit;
+      chooseHistory(hit);
+    }
+    return;
+  }
   if (screen === "tutorial") {
     const nav = renderer.hitTutorialNav(p.x, p.y);
     if (nav === "next") tutorialNext();
@@ -1347,9 +1712,15 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "complete") {
-    screen = "menu";
-    sound.play("click");
-    sound.startMenu();
+    const hit = renderer.hitComplete(p.x, p.y, completeShowStats, runLevels.length, completeStatsIndex);
+    if (hit === "stats") {
+      completeShowStats = !completeShowStats;
+      sound.play("click");
+    } else if (typeof hit === "number") {
+      completeStatsIndex = hit;
+    } else if (hit === "done" && !completeShowStats) {
+      leaveComplete();
+    }
     return;
   }
   if (screen === "pause") {
@@ -1370,7 +1741,7 @@ canvas.addEventListener("pointerdown", (e) => {
         persist();
         sound.play("click");
       } else if (hit.row === 0) {
-        settingsNameFocus = true;
+        beginNameEdit();
         sound.play("click");
       } else if (hit.row <= 3) {
         nudgeSetting(hit.row, hit.side === "right" ? 1 : -1);
@@ -1493,11 +1864,15 @@ canvas.addEventListener("pointerdown", (e) => {
       openDevMenu();
       return;
     }
-    if (renderer.hitMenuTab(p.x, p.y, playMode === "editor-test")) {
+    if (renderer.hitMenuTab(p.x, p.y, playMode === "editor-test" || playMode === "replay")) {
       if (playMode === "editor-test") {
         screen = "editor";
         sound.play("click");
         sound.startMenu();
+        return;
+      }
+      if (playMode === "replay") {
+        exitReplay();
         return;
       }
       openPause();
@@ -1550,8 +1925,8 @@ function pointerOverHit(p: { x: number; y: number }): boolean {
       return nav !== null;
     }
     case "play":
-      if (isDev() && renderer.hitDevTab(p.x, p.y)) return true;
-      return renderer.hitMenuTab(p.x, p.y, playMode === "editor-test");
+      if (isDev() && playMode !== "replay" && renderer.hitDevTab(p.x, p.y)) return true;
+      return renderer.hitMenuTab(p.x, p.y, playMode === "editor-test" || playMode === "replay");
     case "devMenu":
       return (
         renderer.hitDevMenuList(p.x, p.y, LEVELS.length, loadIndex) !== null ||
@@ -1572,6 +1947,16 @@ function pointerOverHit(p: { x: number; y: number }): boolean {
       );
     case "editorSave":
       return renderer.hitSavePrompt(p.x, p.y) !== null;
+    case "complete": {
+      const hit = renderer.hitComplete(p.x, p.y, completeShowStats, runLevels.length, completeStatsIndex);
+      return hit === "stats" || hit === "done" || typeof hit === "number";
+    }
+    case "history":
+      return (
+        renderer.hitGhostsToggle(p.x, p.y) ||
+        renderer.hitListBack(p.x, p.y) ||
+        renderer.hitStageList(p.x, p.y, historyRows().length, historyIndex) !== null
+      );
     default:
       return false;
   }
@@ -1642,14 +2027,22 @@ canvas.addEventListener("pointermove", (e) => {
     menuHover = renderer.hitEditorTool(p.x, p.y, EDITOR_TOOLS.length);
   } else if (screen === "editorSave") menuHover = renderer.hitSavePrompt(p.x, p.y);
   else if (screen === "play") {
-    if (isDev() && renderer.hitDevTab(p.x, p.y)) extraHover = "dev";
-    else if (renderer.hitMenuTab(p.x, p.y, playMode === "editor-test")) extraHover = "tab";
+    if (isDev() && playMode !== "replay" && renderer.hitDevTab(p.x, p.y)) extraHover = "dev";
+    else if (renderer.hitMenuTab(p.x, p.y, playMode === "editor-test" || playMode === "replay")) extraHover = "tab";
   } else if (screen === "devMenu") {
     menuHover = renderer.hitDevMenuList(p.x, p.y, LEVELS.length, loadIndex);
     extraHover = renderer.hitDevMenuFooter(p.x, p.y);
   } else if (screen === "pause") {
     if (renderer.hitMenuTab(p.x, p.y)) extraHover = "tab";
     menuHover = renderer.hitPause(p.x, p.y);
+  } else if (screen === "complete") {
+    const hit = renderer.hitComplete(p.x, p.y, completeShowStats, runLevels.length, completeStatsIndex);
+    if (hit === "stats") extraHover = "stats";
+    else if (typeof hit === "number") menuHover = hit;
+  } else if (screen === "history") {
+    if (renderer.hitGhostsToggle(p.x, p.y)) extraHover = "ghosts";
+    else if (renderer.hitListBack(p.x, p.y)) extraHover = "back";
+    else menuHover = renderer.hitStageList(p.x, p.y, historyRows().length, historyIndex);
   }
   canvas.style.cursor = pointerOverHit(p) ? "pointer" : "default";
   if (paintHeld && screen === "editor") {
@@ -1678,7 +2071,7 @@ touch.addEventListener("pointerdown", (e) => {
   }
   const dir = btn.getAttribute("data-dir") as Dir | null;
   if (dir) move(dir);
-  if (btn.getAttribute("data-act") === "space") stage?.swapSplit();
+  if (btn.getAttribute("data-act") === "space") swapBlock();
 });
 
 let last = now();
@@ -1701,8 +2094,10 @@ function pollPad(): void {
   }
   if (screen === "nameEntry" && (input.justPad("confirm") || input.justPad("pause"))) {
     if (nameDraft.trim()) {
+      const prev = settings.playerName;
       settings.playerName = nameDraft.trim();
       persist();
+      maybeDevUnlock(prev, settings.playerName);
       screen = "menu";
       sound.startMenu();
     }
@@ -1748,7 +2143,7 @@ function pollPad(): void {
         persist();
         sound.play("click");
       } else if (settingsIndex === 0) {
-        settingsNameFocus = true;
+        beginNameEdit();
         sound.play("click");
       } else if (settingsIndex >= 4) {
         input.listening = input.bindList()[settingsIndex - 4];
@@ -1772,13 +2167,35 @@ function pollPad(): void {
     return;
   }
   if (screen === "play") {
+    if (playMode === "replay") {
+      if (input.justPad("pause") || input.justPad("back")) openPause();
+      return;
+    }
     const dir = input.consumeMove();
     if (dir) move(dir);
-    if (input.justPad("swap")) {
-      stage?.swapSplit();
-      sound.play("click", { volume: 0.5 });
-    }
+    if (input.justPad("swap")) swapBlock();
     if (input.justPad("pause")) openPause();
+    return;
+  }
+  if (screen === "history") {
+    const n = historyRows().length;
+    if (input.justPad("back")) {
+      handleHistoryKey({ key: "Escape" } as KeyboardEvent);
+    }
+    if (input.justPad("down") && n) {
+      historyIndex = (historyIndex + 1) % n;
+      sound.play("hover");
+    }
+    if (input.justPad("up") && n) {
+      historyIndex = (historyIndex + n - 1) % n;
+      sound.play("hover");
+    }
+    if (input.justPad("confirm") && n) chooseHistory(historyIndex);
+    if (input.justPad("swap")) {
+      seeGhosts = !seeGhosts;
+      saveSeeGhosts(seeGhosts);
+      sound.play("click");
+    }
     return;
   }
   if (screen === "devMenu") {
@@ -1814,7 +2231,30 @@ function pollPad(): void {
       if (input.justPad("confirm")) jumpCampaign(loadIndex);
     }
   }
-  if ((screen === "credits" || screen === "complete") && (input.justPad("confirm") || input.justPad("back"))) {
+  if (screen === "complete") {
+    if (input.justPad("down") && completeShowStats && runLevels.length) {
+      completeStatsIndex = (completeStatsIndex + 1) % runLevels.length;
+      sound.play("hover");
+    } else if (input.justPad("up") && completeShowStats && runLevels.length) {
+      completeStatsIndex = (completeStatsIndex + runLevels.length - 1) % runLevels.length;
+      sound.play("hover");
+    } else if (input.justPad("swap")) {
+      completeShowStats = !completeShowStats;
+      sound.play("click");
+    } else if (input.justPad("back")) {
+      if (completeShowStats) {
+        completeShowStats = false;
+        sound.play("click");
+      } else leaveComplete();
+    } else if (input.justPad("confirm")) {
+      if (completeShowStats) {
+        completeShowStats = false;
+        sound.play("click");
+      } else leaveComplete();
+    }
+    return;
+  }
+  if (screen === "credits" && (input.justPad("confirm") || input.justPad("back"))) {
     screen = "menu";
     sound.play("click");
     sound.startMenu();
@@ -1894,8 +2334,15 @@ function update(dt: number): void {
         if (kind === "splitdrop") sound.play("whoosh_2");
       } else if (kind === "fall" && pendingResult === "fail") {
         stage.anim = null;
+        if (playMode === "replay") {
+          exitReplay();
+          return;
+        }
         if (!currentDef) return;
+        const deaths = stage.attempts;
+        commitAttempt(false);
         stage = new Stage(currentDef);
+        stage.attempts = deaths;
         renderer.cam = fitCamera(stage);
         enterPlay();
       } else if (kind === "sink" && pendingResult === "win") {
@@ -1909,6 +2356,10 @@ function update(dt: number): void {
     if (pendingResult === "scatter" && stage.scatter >= 1) {
       pendingResult = null;
       afterWin();
+    }
+    if (screen === "play") {
+      for (const ghost of ghosts) ghost.tick(dt);
+      feedReplay();
     }
   }
 
@@ -1947,7 +2398,7 @@ function draw(): void {
     return;
   }
 
-  if (screen === "menu" || screen === "load" || screen === "credits" || screen === "ask") {
+  if (screen === "menu" || screen === "load" || screen === "credits" || screen === "ask" || screen === "history") {
     renderer.drawBg("menu");
     drawMark(28, 110);
     if (screen === "menu" || screen === "ask") {
@@ -1971,6 +2422,19 @@ function draw(): void {
     }
     if (screen === "credits") renderer.drawCredits();
     if (screen === "ask") renderer.drawAskInstructions(askIndex, menuHover);
+    if (screen === "history") {
+      renderer.drawHistory(
+        historyView === "detail" ? "Run" : "History",
+        historyRows(),
+        historyIndex,
+        extraHover === "back" || extraHover === "ghosts" ? null : menuHover,
+        seeGhosts,
+        extraHover === "ghosts",
+        extraHover === "back",
+        "Finish campaign stages to record runs here.",
+        historyView === "detail" ? "Enter replay   G ghosts" : "Enter open run   G ghosts",
+      );
+    }
     return;
   }
 
@@ -2074,20 +2538,33 @@ function draw(): void {
   }
 
   if (screen === "complete") {
-    renderer.drawComplete(sessionMoves, formatTime(now() - sessionStart), sessionFails);
+    const hover =
+      extraHover === "stats" || extraHover === "back"
+        ? extraHover
+        : menuHover;
+    renderer.drawComplete(
+      sessionMoves,
+      formatTime(sessionTimeMs || now() - sessionStart),
+      sessionFails,
+      completeShowStats,
+      runLevels.map(levelStatLabel),
+      completeStatsIndex,
+      hover,
+    );
     return;
   }
 
   if ((screen === "play" || screen === "pause" || screen === "devMenu") && stage) {
     renderer.drawBg("level");
-    renderer.drawLevel(stage);
+    renderer.drawLevel(stage, playMode === "replay" ? ghosts.map((g) => g.stage) : []);
     renderer.drawHud(
       stage.def.code,
       stage.moves,
-      playMode === "editor-test" ? "Back to Editor" : "Menu",
+      playMode === "editor-test" ? "Back to Editor" : playMode === "replay" ? "Exit" : "Menu",
       extraHover === "tab",
-      isDev() && playMode !== "editor-test",
+      isDev() && playMode !== "editor-test" && playMode !== "replay",
       extraHover === "dev",
+      playMode === "replay",
     );
     if (screen === "pause") {
       renderer.drawPause(

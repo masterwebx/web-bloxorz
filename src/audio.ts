@@ -102,6 +102,30 @@ export class SoundBank {
     return this.muted;
   }
 
+  /** Short jingle when the player name becomes DEV and the hidden menu unlocks. */
+  playDevUnlock(): void {
+    this.play("title_card", { volume: 0.8 });
+    this.play("whoosh_2", { volume: 0.85 });
+    if (this.muted || !this.unlocked) return;
+    const ctx = this.getCtx();
+    this.ensureGains();
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = freq;
+      const t0 = ctx.currentTime + i * 0.09;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(0.14, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.24);
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+      osc.start(t0);
+      osc.stop(t0 + 0.26);
+    });
+  }
+
   private ensureGains(): void {
     const ctx = this.getCtx();
     if (!this.sfxGain) {

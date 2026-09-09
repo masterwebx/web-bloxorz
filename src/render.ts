@@ -23,7 +23,7 @@ const GROUND = 0.04;
 const MENU_X = 42;
 export const MENU_Y = 156;
 export const MENU_GAP = 22;
-export const MENU_COUNT = 7;
+export const MENU_COUNT = 8;
 export const PAUSE_COUNT = 4;
 export const LIST_Y0 = 148;
 export const LIST_GAP = 22;
@@ -455,7 +455,7 @@ export class Renderer {
     this.ctx.fillRect(0, 0, STAGE_W, STAGE_H);
   }
 
-  drawLevel(stage: Stage): void {
+  drawLevel(stage: Stage, ghosts: Stage[] = []): void {
     const scatter = stage.scatter;
     const intro = scatter > 0 ? 1 : stage.assemble;
     for (let y = 0; y < H; y++) {
@@ -511,6 +511,10 @@ export class Renderer {
     }
 
     if (intro >= 1 && scatter < 0.08) {
+      for (const ghost of ghosts) {
+        if (ghost.scatter > 0.08) continue;
+        for (const it of this.blockDrawables(ghost, 0.3)) it.draw();
+      }
       for (const it of this.blockDrawables(stage)) it.draw();
     }
   }
@@ -529,11 +533,11 @@ export class Renderer {
     this.ctx.fill();
   }
 
-  private blockDrawables(stage: Stage): { depth: number; draw: () => void }[] {
+  private blockDrawables(stage: Stage, alphaMul = 1): { depth: number; draw: () => void }[] {
     const anim = stage.anim;
     if (stage.split) {
-      const a = this.cubeDrawable(stage, stage.cubeA, stage.active === 0, 0);
-      const b = this.cubeDrawable(stage, stage.cubeB, stage.active === 1, 1);
+      const a = this.cubeDrawable(stage, stage.cubeA, stage.active === 0, 0, alphaMul);
+      const b = this.cubeDrawable(stage, stage.cubeB, stage.active === 1, 1, alphaMul);
       return [a, b];
     }
     const state = anim && (anim.kind === "roll" || anim.kind === "fall" || anim.kind === "sink" || anim.kind === "drop")
@@ -543,19 +547,19 @@ export class Renderer {
     return [
       {
         depth,
-        draw: () => this.drawBox(stage.block, anim, false),
+        draw: () => this.drawBox(stage.block, anim, false, 0, alphaMul),
       },
     ];
   }
 
-  private cubeDrawable(stage: Stage, cell: Cell, active: boolean, which: 0 | 1) {
+  private cubeDrawable(stage: Stage, cell: Cell, active: boolean, which: 0 | 1, alphaMul = 1) {
     const moving = stage.anim?.kind === "roll" && stage.active === which;
     const state: BlockState = { x: cell.x, y: cell.y, ori: "up" };
     return {
       depth: cell.y * 20 - cell.x + 8,
       draw: () => {
-        this.drawBox(state, moving ? stage.anim : stage.anim?.kind === "splitdrop" ? stage.anim : null, true, which);
-        if (active && stage.selectTimer > 0) this.drawBrackets(cell, stage.selectTimer);
+        this.drawBox(state, moving ? stage.anim : stage.anim?.kind === "splitdrop" ? stage.anim : null, true, which, alphaMul);
+        if (active && alphaMul >= 1 && stage.selectTimer > 0) this.drawBrackets(cell, stage.selectTimer);
       },
     };
   }
@@ -578,7 +582,7 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  drawBox(state: BlockState, anim: Anim | null, cube: boolean, which: 0 | 1 = 0): void {
+  drawBox(state: BlockState, anim: Anim | null, cube: boolean, which: 0 | 1 = 0, alphaMul = 1): void {
     let extraZ = 0;
     let alpha = 1;
     let roll: { origin: [number, number, number]; axis: [number, number, number]; angle: number } | undefined;
@@ -645,14 +649,14 @@ export class Renderer {
     this.drawBlockShadow(
       boxState,
       cube,
-      anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38,
+      (anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38) * alphaMul,
     );
 
     const shade = [1, 0.55, 0.82, 0.66, 0.74, 0.88];
 
     const ctx = this.ctx;
     ctx.save();
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = alpha * alphaMul;
     for (const f of faces) {
       if (f.cross <= 0) continue;
       if (extraZ >= -0.08 && isFloorFace(corners, FACES[f.fi])) continue;
@@ -769,11 +773,20 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawHud(code: string, moves: number, tab = "Menu", tabHot = false, showDev = false, devHot = false): void {
+  drawHud(
+    code: string,
+    moves: number,
+    tab = "Menu",
+    tabHot = false,
+    showDev = false,
+    devHot = false,
+    replay = false,
+  ): void {
     this.drawMenuTab(tab, tabHot);
     if (showDev) this.drawUiText("Dev Menu", 14, 42, { size: 13, color: "#111", hot: devHot });
     this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", color: "#111" });
     this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", color: "#111" });
+    if (replay) this.drawUiText("Replay", 536, 54, { size: 13, align: "right", color: "#111" });
   }
 
   drawMenuTab(label = "Menu", hot = false): void {
@@ -864,6 +877,7 @@ export class Renderer {
       "Resume Game",
       "Load Stage",
       "Stage Creator",
+      "History",
       "Settings",
       "Toggle Sound",
       "Credits",
@@ -876,7 +890,7 @@ export class Renderer {
       this.ctx.globalAlpha = dim ? 0.32 : 1;
       if (selected === i && !dim) this.drawUiText(">", MENU_X - 16, y + 16, { size: 14, hot });
       this.drawUiText(label, MENU_X + 4, y + 16, { size: 14, hot });
-      if (i === 5) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 14, hot });
+      if (i === 6) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 14, hot });
       this.ctx.restore();
     });
   }
@@ -1153,8 +1167,42 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawComplete(moves: number, time: string, fails: number): void {
+  drawComplete(
+    moves: number,
+    time: string,
+    fails: number,
+    showStats: boolean,
+    statsRows: string[],
+    statsIndex: number,
+    hover: "stats" | "back" | number | null,
+  ): void {
     this.drawBg("menu");
+    if (showStats) {
+      this.drawUiText("Stage times", STAGE_W / 2, 92, { size: 20, glow: true, align: "center" });
+      if (!statsRows.length) {
+        this.drawUiText("No per-stage times this run.", STAGE_W / 2, 180, {
+          size: 13,
+          align: "center",
+          weight: "500",
+        });
+      } else {
+        const start = listStart(statsRows.length, statsIndex);
+        statsRows.slice(start, start + LIST_MAX).forEach((row, i) => {
+          const idx = start + i;
+          const y = 148 + i * LIST_GAP;
+          const hot = hover === idx || (hover === null && statsIndex === idx);
+          this.drawUiText(row, 42, y, { size: 13, hot });
+        });
+      }
+      this.drawUiText("Hide Stats", STAGE_W / 2, 372, {
+        size: 14,
+        glow: true,
+        align: "center",
+        color: "#ffb060",
+        hot: hover === "stats" || hover === "back",
+      });
+      return;
+    }
     this.drawUiText("Congratulations", STAGE_W / 2, 92, { size: 22, glow: true, align: "center" });
     this.drawUiText("You completed the 33 stages of Bloxorz!", STAGE_W / 2, 150, { size: 14, glow: true, align: "center" });
     this.drawUiText("Moves Taken:", STAGE_W / 2 + 20, 200, { size: 14, glow: true, align: "right" });
@@ -1163,7 +1211,70 @@ export class Renderer {
     this.drawUiText(String(moves), STAGE_W / 2 + 32, 200, { size: 14, glow: true });
     this.drawUiText(time, STAGE_W / 2 + 32, 224, { size: 14, glow: true });
     this.drawUiText(String(fails), STAGE_W / 2 + 32, 248, { size: 14, glow: true });
-    this.drawUiText("Press Enter or click to return to the menu", STAGE_W / 2, 310, { size: 13, glow: true, align: "center", color: "#ffb060" });
+    this.drawUiText("Show Stats", STAGE_W / 2, 292, {
+      size: 15,
+      glow: true,
+      align: "center",
+      color: "#ffb060",
+      hot: hover === "stats",
+    });
+    this.drawUiText("Press Enter or click to return to the menu", STAGE_W / 2, 338, {
+      size: 13,
+      glow: true,
+      align: "center",
+      color: "#ffb060",
+    });
+  }
+
+  hitComplete(mx: number, my: number, showStats: boolean, statsCount = 0, statsIndex = 0): "stats" | "done" | number | null {
+    if (showStats) {
+      if (statsCount) {
+        const start = listStart(statsCount, statsIndex);
+        const i = Math.floor((my - 132) / LIST_GAP);
+        if (mx >= 24 && mx <= 530 && i >= 0 && i < LIST_MAX) {
+          const idx = start + i;
+          if (idx >= 0 && idx < statsCount) return idx;
+        }
+      }
+      if (my >= 352 && my <= 388) return "stats";
+      return null;
+    }
+    if (my >= 274 && my <= 308 && mx >= 160 && mx <= 390) return "stats";
+    return "done";
+  }
+
+  drawHistory(
+    title: string,
+    rows: string[],
+    selected: number,
+    hover: number | null,
+    ghostsOn: boolean,
+    ghostsHot: boolean,
+    backHot: boolean,
+    empty: string,
+    hint: string,
+  ): void {
+    this.drawUiText(title, 42, 128, { size: 18 });
+    this.drawUiText(`See ghosts: ${ghostsOn ? "On" : "Off"}`, STAGE_W - 42, 128, {
+      size: 13,
+      align: "right",
+      hot: ghostsHot,
+    });
+    if (!rows.length) this.drawUiText(empty, 48, 176, { size: 13, weight: "500" });
+    const start = listStart(rows.length, selected);
+    rows.slice(start, start + LIST_MAX).forEach((n, i) => {
+      const idx = start + i;
+      const y = 160 + i * LIST_GAP;
+      const hot = hover === idx || (hover === null && selected === idx);
+      if (idx === selected) this.drawUiText(">", 28, y, { size: 13, hot });
+      this.drawUiText(n, 48, y, { size: 13, hot });
+    });
+    this.drawUiText("Back", 42, 386, { size: 13, hot: backHot });
+    this.drawUiText(hint, 140, 386, { size: 11, weight: "500" });
+  }
+
+  hitGhostsToggle(mx: number, my: number): boolean {
+    return my >= 110 && my <= 140 && mx > STAGE_W - 220;
   }
 
   hitPause(mx: number, my: number): number | null {

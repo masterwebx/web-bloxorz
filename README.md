@@ -4,7 +4,9 @@ A browser remake of Damien Clarke's 2007 puzzle game **Bloxorz**. All 33 origina
 
 On first launch you enter a name. The title becomes that name plus **ORZ** — Wex is **WEXORZ**, David is **DAVIDORZ**. Change it later in Settings.
 
-Set the name to **DEV** (any case) to unlock developer tools: **Load Stage** becomes a 33-stage list, and in-game **Dev Menu** jumps between stages or force-wins. Mechanics coverage vs the original Flash game is in `AUDIT.md`. `npm test` runs the engine unit tests.
+Set the name to **DEV** (any case) to unlock developer tools: **Load Stage** becomes a 33-stage list, and in-game **Dev Menu** jumps between stages or force-wins. A short jingle plays when you first set the name to DEV so you know it unlocked. Mechanics coverage vs the original Flash game is in `AUDIT.md`. `npm test` runs the engine unit tests.
+
+Each death counts as an attempt (shown on the pause screen). Finishing the campaign freezes the time on the congratulations screen; **Show Stats** lists how long each stage took. **History** on the main menu stores previous campaign runs so you can replay a stage’s winning route. Turn on **See ghosts** to overlay your other tries on that replay, Super Meat Boy style.
 
 This project reconstructs the Flash game using:
 
