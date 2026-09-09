@@ -1,3 +1,5 @@
+> **Reference freeze.** This canvas remake is parked at the last good commit before a failed original-sprite port. Active work is the GitHub fork of Cybernate, which keeps their CreateJS game as the base: **https://github.com/masterwebx/bloxorz-cybernate**
+
 # Player-named Bloxorz remake
 
 A browser remake of Damien Clarke's 2007 puzzle game **Bloxorz**. All 33 original stages are included, with the same passcodes, switches, bridges, split blocks, and orange tiles.
