@@ -1,5 +1,5 @@
 import { assetUrl } from "./assets";
-import { decodeLevel, encodeLevel, type SavedStage } from "./customLevels";
+import { decodeLevel, encodeLevel, padTiles, stageId, type SavedStage } from "./customLevels";
 import type { LevelDef } from "./levels";
 
 const GITHUB_JSON =
@@ -27,6 +27,7 @@ export function communityToSaved(row: CommunityStage): SavedStage | null {
       name: row.name || "Community Stage",
       author: row.author || "Community",
       code: row.code,
+      seed: stageId(def),
       def,
       source: "downloaded",
     };
@@ -35,7 +36,7 @@ export function communityToSaved(row: CommunityStage): SavedStage | null {
   const def: LevelDef = {
     id: "custom",
     code: "000000",
-    tiles: row.tiles.map((r) => (r + "               ").slice(0, 15)),
+    tiles: padTiles(row.tiles.map((r) => r)),
     spawn: row.spawn,
     switches: row.switches ?? [],
     splits: row.splits ?? [],
@@ -44,6 +45,7 @@ export function communityToSaved(row: CommunityStage): SavedStage | null {
     name: row.name || "Community Stage",
     author: row.author || "Community",
     code: encodeLevel(def),
+    seed: stageId(def),
     def,
     source: "downloaded",
   };

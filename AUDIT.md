@@ -2,7 +2,7 @@
 
 Compared the original Flash 8 / ActionScript 2 SWF (`levelcodes`, tile movie clips, `softswitch` / `hardswitch` / `splitswitch` / `doorblockl` / `doorblockr`, `rejoinblocks`) with this Canvas port.
 
-Unit tests live in `src/engine.test.ts`, `src/campaign.test.ts`, `src/generate.test.ts`, and `src/history.test.ts`. Run `npm test`.
+Unit tests live in `src/engine.test.ts`, `src/campaign.test.ts`, `src/generate.test.ts`, `src/history.test.ts`, and `src/editor.test.ts`. Run `npm test`.
 
 The campaign suite replays the Free Web Arcade / JayIsGames solutions on all 33 stages (stage 03 uses a BFS-verified path because the published FAQ falls off this GBA reconstruction) and separately BFS-solves every stage so split / switch / orange mechanics cannot silently break.
 
@@ -47,5 +47,7 @@ The campaign suite replays the Free Web Arcade / JayIsGames solutions on all 33 
 | Author / publisher splash | Author card only | No |
 | Congratulations stats | Yes | No |
 | Gamepad / rumble | HTML5 extra | No |
-| Stage creator / packs / community | HTML5 extra | No |
+| Stage creator / packs / community | HTML5 extra | Yes — `editor.test.ts` (split destinations, beatability, BXS seeds) |
 | DEV name tools | HTML5 extra | Yes — `isDevName` |
+| DEV “Beat stage for me” | HTML5 extra | Yes — `solveLevel` feeds the proven path |
+| Custom stage reverse seeds (`BXS-` / `BXS.`) | HTML5 extra | Yes — `encodeSeed` / `stageId` |

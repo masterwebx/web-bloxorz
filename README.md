@@ -4,7 +4,7 @@ A browser remake of Damien Clarke's 2007 puzzle game **Bloxorz**. All 33 origina
 
 On first launch you enter a name. The title becomes that name plus **ORZ** — Wex is **WEXORZ**, David is **DAVIDORZ**. Change it later in Settings.
 
-Set the name to **DEV** (any case) to unlock developer tools: **Load Stage** becomes a 33-stage list, and in-game **Dev Menu** jumps between stages or force-wins. A short jingle plays when you first set the name to DEV so you know it unlocked. Mechanics coverage vs the original Flash game is in `AUDIT.md`. `npm test` plays the [official 33-stage walkthrough](https://www.freewebarcade.com/help/bloxorz-walkthrough.php) and BFS-solves every campaign stage so splits, switches, bridges, and orange tiles stay honest.
+Set the name to **DEV** (any case) to unlock developer tools: **Load Stage** becomes a 33-stage list, in-game **Dev Menu** jumps between stages or force-wins, and **Beat stage for me** (under Menu, in every play mode including editor playtest) restarts at spawn and rolls the BFS solution. A short jingle plays when you first set the name to DEV so you know it unlocked. Mechanics coverage vs the original Flash game is in `AUDIT.md`. `npm test` plays the [official 33-stage walkthrough](https://www.freewebarcade.com/help/bloxorz-walkthrough.php) and BFS-solves every campaign stage so splits, switches, bridges, and orange tiles stay honest.
 
 Each death counts as an attempt (shown on the pause screen). Finishing the campaign freezes the time on the congratulations screen; **Show Stats** lists how long each stage took. **History** on the main menu stores previous campaign runs so you can replay a stage’s winning route. Turn on **See ghosts** to overlay your other tries on that replay, Super Meat Boy style.
 
@@ -49,13 +49,17 @@ From the main menu, **Stage Creator** splits into **Create** and **Play**.
 - **New Stage** — paint a 15×10 grid. A new stage starts with a stone path, a spawn, and an exit already connected.
 - **Manage** — edit or delete local and downloaded stages, or build a **stage pack** (an ordered list of stages). Enter opens a stage in the editor or plays a pack. Delete / Backspace removes a stage or pack.
 
-Keyboard and controller both work in the editor: arrows / stick move the cursor, Confirm / A paints, `[` `]` or LB/RB (or X) cycle tools, Enter / Start tests the stage.
+Keyboard and controller both work in the editor: arrows / stick move the cursor, Confirm / A paints, `[` `]` or LB/RB (or X) cycle tools, Enter / Start tests the stage. Playtest is always allowed even if the solver says the map is impossible.
 
-You have to beat a stage before it can be saved. Saved stages get a `BX1.` share code you can copy, and they store your player name as the author.
+A live badge shows **CAN BE BEAT** (green) or **IMPOSSIBLE** (red) using the same BFS used for puzzles. It does not block Test.
+
+**Split** is a three-click tool: paint the pad, then click cube A’s landing tile, then cube B’s. Those landings stay ordinary tiles (not extra split pads). Click a left/right bridge a second time to start it ON (`k` / `q`).
+
+You have to beat a stage before it can be saved. Every layout gets a short id (`BXS-XXXXXXXX`) and a reconstructable **BXS.** seed (packed tiles, spawn, switches, splits). Saved stages also still get a `BX1.` share code. Enter Code accepts BX1, BXS. seeds, or a short BXS- id if that stage is already on the machine / community list. They store your player name as the author.
 
 ### Play
 
-- **Enter Code** — paste or type a `BX1.` share code
+- **Enter Code** — paste a `BX1.` share code, a `BXS.` seed, or a short `BXS-` id already saved/downloaded
 - **Offline** — stages saved on this machine
 - **Online** — stages listed in the community JSON (see below)
 

@@ -782,13 +782,19 @@ export class Renderer {
     devHot = false,
     replay = false,
     splitHint = false,
+    showBeat = false,
+    beatHot = false,
+    status = "",
+    codeLabel = "Passcode",
   ): void {
     this.drawMenuTab(tab, tabHot);
     if (showDev) this.drawUiText("Dev Menu", 14, 42, { size: 13, color: "#111", hot: devHot });
-    this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", color: "#111" });
+    if (showBeat) this.drawUiText("Beat stage for me", 14, 62, { size: 13, color: "#111", hot: beatHot });
+    this.drawUiText(`${codeLabel}: ${code}`, 536, 18, { size: 13, align: "right", color: "#111" });
     this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", color: "#111" });
-    if (replay) this.drawUiText("Replay", 536, 54, { size: 13, align: "right", color: "#111" });
-    if (splitHint) this.drawUiText("Space: switch cube", 14, 64, { size: 13, color: "#111" });
+    const banner = status || (replay ? "Replay" : "");
+    if (banner) this.drawUiText(banner, 536, 54, { size: 13, align: "right", color: "#111" });
+    if (splitHint) this.drawUiText("Space: switch cube", 14, showBeat ? 84 : 64, { size: 13, color: "#111" });
   }
 
   drawMenuTab(label = "Menu", hot = false): void {
@@ -801,6 +807,10 @@ export class Renderer {
 
   hitDevTab(mx: number, my: number): boolean {
     return mx >= 8 && mx <= 120 && my >= 30 && my <= 50;
+  }
+
+  hitBeatTab(mx: number, my: number): boolean {
+    return mx >= 8 && mx <= 210 && my >= 52 && my <= 74;
   }
 
   drawTitle(title: string, alpha: number, shake: { x: number; y: number }, subtitle?: string): void {
@@ -1437,6 +1447,9 @@ export class Renderer {
     cursor: { x: number; y: number },
     headerHot: "test" | "back" | null,
     toolHover: number | null = null,
+    seed = "",
+    beat: "wait" | "yes" | "no" = "wait",
+    marks: { x: number; y: number; label: string }[] = [],
   ): void {
     const ctx = this.ctx;
     ctx.save();
@@ -1470,6 +1483,14 @@ export class Renderer {
           this.ctx.strokeRect(px + 0.5, py + 0.5, cs - 2, cs - 2);
           this.ctx.lineWidth = 1;
         }
+        const mark = marks.find((m) => m.x === x && m.y === y);
+        if (mark) {
+          this.ctx.fillStyle = "#ffe8c0";
+          this.ctx.font = "700 11px Orbitron, sans-serif";
+          this.ctx.textAlign = "center";
+          this.ctx.textBaseline = "middle";
+          this.ctx.fillText(mark.label, px + 11, py + 12);
+        }
       }
     }
     tools.forEach((t, i) => {
@@ -1479,6 +1500,10 @@ export class Renderer {
       if (t === tool) this.drawUiText(">", x - 14, y, { size: 12, hot });
       this.drawUiText(t, x, y, { size: 12, hot });
     });
+    const beatLabel = beat === "yes" ? "CAN BE BEAT" : beat === "no" ? "IMPOSSIBLE" : "CHECKING…";
+    const beatColor = beat === "yes" ? "#3d8a4a" : beat === "no" ? "#c04030" : "#887868";
+    this.drawUiText(beatLabel, 410, 300, { size: 12, color: beatColor, glow: false });
+    if (seed) this.drawUiText(seed, 16, 372, { size: 11, weight: "500", color: "#c8b8a0" });
     this.drawUiText(hint, 16, 390, { size: 11, glow: true, weight: "500" });
   }
 
@@ -1596,7 +1621,7 @@ export class Renderer {
 
   drawEnterCode(paste: string, msg: string, hover: "play" | "back" | null): void {
     this.drawUiText("Enter Code", 42, 128, { size: 18 });
-    this.drawUiText("Paste or type a BX1 share code.", 42, 160, { size: 13, weight: "500" });
+    this.drawUiText("Paste a BX1 code or BXS seed.", 42, 160, { size: 13, weight: "500" });
     this.drawUiText(paste || "_", 42, 210, { size: 14, weight: "500" });
     this.drawUiText("Play", 48, 258, { size: 15, hot: hover === "play" });
     this.drawUiText("Back", 42, 386, { size: 13, hot: hover === "back" });
@@ -1660,12 +1685,13 @@ export class Renderer {
     return null;
   }
 
-  drawSavePrompt(code: string, msg: string, hover: number | null): void {
+  drawSavePrompt(code: string, msg: string, hover: number | null, seed = ""): void {
     this.drawUiText("Stage beaten — it can be saved.", 275, 160, { size: 16, glow: true, align: "center" });
     this.drawUiText(`Name: ${msg}_`, 275, 190, { size: 13, glow: true, align: "center" });
-    this.drawUiText("Save & Copy Code", 275, 230, { size: 15, glow: true, align: "center", hot: hover === 0 });
+    this.drawUiText("Save & Copy Seed", 275, 230, { size: 15, glow: true, align: "center", hot: hover === 0 });
     this.drawUiText("Keep Editing", 275, 258, { size: 15, glow: true, align: "center", hot: hover === 1 });
-    this.drawUiText(code.length > 48 ? `${code.slice(0, 42)}…` : code, 275, 300, {
+    if (seed) this.drawUiText(seed, 275, 292, { size: 13, glow: true, align: "center", color: "#ffe8c0" });
+    this.drawUiText(code.length > 48 ? `${code.slice(0, 42)}…` : code, 275, 318, {
       size: 10,
       glow: true,
       align: "center",

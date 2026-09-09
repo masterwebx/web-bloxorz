@@ -1,24 +1,25 @@
 import { loadAssets, STAGE_H, STAGE_W } from "./assets";
 import { SoundBank } from "./audio";
 import {
-  decodeLevel,
   deletePack,
   deleteStage,
   emptyDraft,
   encodeLevel,
+  encodeSeed,
   isPlayable,
   listAllStages,
   listDownloaded,
   listPacks,
   listSaved,
   packStages,
+  parseShare,
   savePack,
   saveStage,
-  setTile,
-  tileChar,
+  stageId,
   type SavedStage,
   type StagePack,
 } from "./customLevels";
+import { checkBeatable, EDITOR_TOOLS, newPaintState, paintEditorCell, splitMarks, type BeatStatus, type EditorToolId } from "./editor";
 import { fetchOnlineStages } from "./community";
 import { LEVELS, Stage, levelByCode, type Dir } from "./engine";
 import {
@@ -47,7 +48,8 @@ import {
   type Puzzle,
 } from "./generate";
 import { ACTION_LABEL, brandName, isDevName, loadSettings, saveSettings, type Action, type Settings } from "./settings";
-import type { LevelDef, SwitchMode } from "./levels";
+import { solveLevel } from "./solve";
+import type { LevelDef } from "./levels";
 
 type Screen =
   | "boot"
@@ -74,20 +76,6 @@ type CreatorPage = "root" | "create" | "play" | "enterCode" | "offline" | "onlin
 
 type PlayMode = "campaign" | "custom" | "editor-test" | "replay" | "puzzle";
 type PuzzlePage = "root" | "daily" | "seeded";
-
-const EDITOR_TOOLS = [
-  { id: "erase", label: "Erase", ch: " " },
-  { id: "stone", label: "Stone", ch: "b" },
-  { id: "exit", label: "Exit", ch: "e" },
-  { id: "soft", label: "Soft Sw.", ch: "s" },
-  { id: "heavy", label: "Heavy Sw.", ch: "h" },
-  { id: "fragile", label: "Fragile", ch: "f" },
-  { id: "split", label: "Split", ch: "v" },
-  { id: "bridgeL", label: "Bridge L", ch: "l" },
-  { id: "bridgeR", label: "Bridge R", ch: "r" },
-  { id: "spawn", label: "Spawn", ch: null },
-  { id: "link", label: "Link Sw.", ch: null },
-] as const;
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
 const touch = document.querySelector<HTMLElement>("#touch")!;
@@ -137,6 +125,10 @@ let replayStage = 0;
 let ghosts: GhostRunner[] = [];
 let historyId = "";
 let feedingReplay = false;
+let autoSolve = false;
+let playBanner = "";
+let beatStatus: BeatStatus = "wait";
+let beatTimer: ReturnType<typeof setTimeout> | null = null;
 let runFlushed = false;
 let puzzlePage: PuzzlePage = "root";
 let puzzleIndex = 0;
@@ -166,12 +158,10 @@ let creatorPage: CreatorPage = "root";
 let draft: LevelDef = emptyDraft();
 let editorName = "My Stage";
 let editorNameFocus = false;
-let editorTool = "stone";
+let editorTool: EditorToolId = "stone";
 let editorHint = "Arrows move the cursor. Confirm paints. [ ] cycle tools.";
 let editorCursor = { x: 2, y: 4 };
-let linkFrom: { x: number; y: number } | null = null;
-let splitStep: 0 | 1 | 2 = 0;
-let splitAt: { x: number; y: number } | null = null;
+let paintState = newPaintState();
 let paintHeld = false;
 let customIndex = 0;
 let pasteBuf = "";
@@ -187,7 +177,7 @@ let customQueue: SavedStage[] = [];
 let customQueueIndex = 0;
 let customOrigin: CreatorPage = "offline";
 let nameDraft = "";
-type ExtraHover = "enter" | "back" | "play" | "test" | "skip" | "next" | "prev" | "tab" | "dev" | "save" | "name" | "win" | "close" | "stats" | "ghosts" | "seed" | null;
+type ExtraHover = "enter" | "back" | "play" | "test" | "skip" | "next" | "prev" | "tab" | "dev" | "beat" | "save" | "name" | "win" | "close" | "stats" | "ghosts" | "seed" | null;
 let extraHover: ExtraHover = null;
 
 function now(): number {
@@ -216,7 +206,65 @@ function endNameEdit(): void {
 }
 
 function campaignRecording(): boolean {
-  return playMode === "campaign";
+  return playMode === "campaign" && !autoSolve;
+}
+
+function tapeLocked(): boolean {
+  return (playMode === "replay" || autoSolve) && !feedingReplay;
+}
+
+function showDevTools(): boolean {
+  return isDev() && playMode !== "replay" && !autoSolve;
+}
+
+function scheduleBeatCheck(): void {
+  beatStatus = "wait";
+  if (beatTimer) clearTimeout(beatTimer);
+  beatTimer = setTimeout(() => {
+    beatStatus = checkBeatable(draft) ? "yes" : "no";
+  }, 280);
+}
+
+function stopAutoSolve(): void {
+  autoSolve = false;
+  replayCmds = [];
+  replayI = 0;
+  feedingReplay = false;
+  if (!playBanner.startsWith("No solution")) playBanner = "";
+}
+
+function startBeatForMe(): void {
+  if (!isDev() || !currentDef || screen !== "play") return;
+  if (playMode === "replay") return;
+  const solved = solveLevel(currentDef, 200_000);
+  if (!solved.ok || !solved.cmds.length) {
+    sound.play("fail");
+    playBanner = "No solution found";
+    return;
+  }
+  autoSolve = true;
+  playBanner = "Auto-solve";
+  replayCmds = solved.cmds;
+  replayI = 0;
+  feedingReplay = false;
+  ghosts = [];
+  pendingResult = null;
+  busy = false;
+  stage = new Stage(currentDef);
+  stage.assemble = 0;
+  renderer.cam = fitCamera(stage);
+  enterPlay();
+  sound.play("click");
+}
+
+function hudCode(): { label: string; value: string } {
+  if (playMode === "campaign") return { label: "Passcode", value: stage?.def.code ?? "" };
+  if (playMode === "puzzle") {
+    const seed = puzzleQueue[puzzleQueueIndex]?.seed ?? "";
+    const shown = seed.length > 28 ? `${seed.slice(0, 26)}…` : seed;
+    return { label: "Seed", value: shown || stageId(currentDef ?? draft) };
+  }
+  return { label: "Seed", value: currentDef ? stageId(currentDef) : stageId(draft) };
 }
 
 function recordCmd(cmd: TapeCmd): void {
@@ -339,7 +387,8 @@ function exitReplay(): void {
 }
 
 function feedReplay(): void {
-  if (playMode !== "replay" || screen !== "play" || !stage || busy) return;
+  if (screen !== "play" || !stage || busy) return;
+  if (playMode !== "replay" && !autoSolve) return;
   if (replayI >= replayCmds.length) return;
   feedingReplay = true;
   const cmd = replayCmds[replayI];
@@ -449,8 +498,8 @@ function manageRows(): { label: string; kind: "packNew" | "stage" | "pack"; stag
   const rows: { label: string; kind: "packNew" | "stage" | "pack"; stage?: SavedStage; pack?: StagePack }[] = [
     { label: "Create Stage Pack", kind: "packNew" },
   ];
-  for (const s of listSaved()) rows.push({ label: `Local · ${s.name}  (${s.author})`, kind: "stage", stage: s });
-  for (const s of listDownloaded()) rows.push({ label: `Downloaded · ${s.name}  (${s.author})`, kind: "stage", stage: s });
+  for (const s of listSaved()) rows.push({ label: `Local · ${s.name}  ·  ${s.seed || stageId(s.def)}`, kind: "stage", stage: s });
+  for (const s of listDownloaded()) rows.push({ label: `Downloaded · ${s.name}  ·  ${s.seed || stageId(s.def)}`, kind: "stage", stage: s });
   for (const p of listPacks()) rows.push({ label: `Pack · ${p.name}`, kind: "pack", pack: p });
   return rows;
 }
@@ -556,7 +605,7 @@ function pointerPos(ev: MouseEvent | PointerEvent): { x: number; y: number } {
 
 function move(dir: Dir): void {
   if (screen !== "play" || !stage || busy) return;
-  if (playMode === "replay" && !feedingReplay) return;
+  if (tapeLocked()) return;
   if (!stage.tryMove(dir)) return;
   recordCmd(dir);
   input.rumble(90, 0.42, 0.62);
@@ -566,7 +615,7 @@ function move(dir: Dir): void {
 
 function swapBlock(): void {
   if (!stage || screen !== "play") return;
-  if (playMode === "replay" && !feedingReplay) return;
+  if (tapeLocked()) return;
   if (!stage.split) return;
   if (stage.anim && stage.anim.kind !== "splitdrop") return;
   stage.swapSplit();
@@ -983,9 +1032,10 @@ function onKey(e: KeyboardEvent): void {
   }
 
   if (screen === "play") {
-    if (playMode === "replay") {
+    if (playMode === "replay" || autoSolve) {
       if (e.key === "r" || e.key === "R") {
-        startReplay(replayStage, replayCmds);
+        if (playMode === "replay") startReplay(replayStage, replayCmds);
+        else restartLevel();
         return;
       }
       if (backKey(e.key) || matchesAction(e.key, "pause")) {
@@ -1194,6 +1244,7 @@ function choosePause(i: number): void {
     sound.play("click");
   } else {
     sound.play("click");
+    stopAutoSolve();
     if (playMode === "replay") {
       exitReplay();
       return;
@@ -1286,7 +1337,9 @@ function handleCreatorKey(e: KeyboardEvent): void {
         draft = cloneDef(row.stage.def);
         editorName = row.stage.name;
         editorCursor = { x: draft.spawn[0], y: draft.spawn[1] };
+        paintState = newPaintState(editorTool);
         screen = "editor";
+        scheduleBeatCheck();
       } else if (row.kind === "pack" && row.pack) {
         const stages = packStages(row.pack);
         if (stages[0]) playSaved(stages[0], stages, 0);
@@ -1387,7 +1440,7 @@ function chooseCreator(i: number): void {
     if (label === "Enter Code") {
       creatorPage = "enterCode";
       pasteBuf = "";
-      customMsg = "Paste or type a BX1 share code.";
+      customMsg = "Paste a BX1 code or BXS seed.";
     } else if (label === "Offline") {
       creatorPage = "offline";
       customIndex = 0;
@@ -1410,15 +1463,20 @@ function openNewStage(): void {
   editorTool = "stone";
   editorCursor = { x: draft.spawn[0], y: draft.spawn[1] };
   editorHint = "Arrows / stick move. Confirm paints. [ ] or LB/RB cycle tools. One spawn and one exit.";
-  linkFrom = null;
-  splitStep = 0;
+  paintState = newPaintState("stone");
   screen = "editor";
+  scheduleBeatCheck();
 }
 
 function cycleEditorTool(dir: number): void {
   const i = EDITOR_TOOLS.findIndex((t) => t.id === editorTool);
   const tool = EDITOR_TOOLS[(i + dir + EDITOR_TOOLS.length) % EDITOR_TOOLS.length];
   editorTool = tool.id;
+  paintState.tool = tool.id;
+  if (tool.id !== "split") {
+    paintState.splitStep = 0;
+    paintState.splitAt = null;
+  }
   sound.play("hover");
 }
 
@@ -1447,91 +1505,10 @@ function startEditorTest(): void {
 }
 
 function paintCell(x: number, y: number): void {
-  const tool = EDITOR_TOOLS.find((t) => t.id === editorTool);
-  if (!tool) return;
-  if (tool.id === "spawn") {
-    draft.spawn = [x, y];
-    editorHint = "Spawn set.";
-    return;
-  }
-  if (tool.id === "link") {
-    const ch = tileChar(draft, x, y);
-    if (ch === "s" || ch === "h") {
-      linkFrom = { x, y };
-      editorHint = "Now click a bridge to link. Click again to cycle On / Off / Toggle.";
-      return;
-    }
-    if (!linkFrom) {
-      editorHint = "Click a soft or heavy switch first.";
-      return;
-    }
-    if (ch !== "l" && ch !== "r" && ch !== "k" && ch !== "q") {
-      editorHint = "Link target must be a bridge.";
-      return;
-    }
-    const from = linkFrom;
-    let sw = draft.switches.find((s) => s.x === from.x && s.y === from.y);
-    if (!sw) {
-      sw = { x: from.x, y: from.y, bridges: [] };
-      draft.switches.push(sw);
-    }
-    const existing = sw.bridges.find((b) => b.x === x && b.y === y);
-    const cycle: SwitchMode[] = ["onoff", "on", "off"];
-    if (existing) {
-      existing.mode = cycle[(cycle.indexOf(existing.mode) + 1) % 3];
-      editorHint = `Bridge link set to ${existing.mode}.`;
-    } else {
-      sw.bridges.push({ x, y, mode: "onoff" });
-      editorHint = "Bridge linked (toggle). Click again to change mode.";
-    }
-    return;
-  }
-  if (tool.ch === "v") {
-    setTile(draft, x, y, "v");
-    splitAt = { x, y };
-    splitStep = 1;
-    editorHint = "Click destination for cube A.";
-    return;
-  }
-  if (tool.ch !== null) {
-    if (splitStep === 1 && splitAt) {
-      const at = splitAt;
-      const pad = draft.splits.find((s) => s.x === at.x && s.y === at.y);
-      if (pad) pad.a = [x, y];
-      else draft.splits.push({ x: at.x, y: at.y, a: [x, y], b: [x, y] });
-      splitStep = 2;
-      editorHint = "Click destination for cube B.";
-      return;
-    }
-    if (splitStep === 2 && splitAt) {
-      const at = splitAt;
-      let pad = draft.splits.find((s) => s.x === at.x && s.y === at.y);
-      if (!pad) {
-        pad = { x: at.x, y: at.y, a: [x, y], b: [x, y] };
-        draft.splits.push(pad);
-      }
-      pad.b = [x, y];
-      splitStep = 0;
-      splitAt = null;
-      editorHint = "Split destinations set.";
-      return;
-    }
-    if (tool.ch === "e") {
-      for (let yy = 0; yy < 10; yy++) {
-        for (let xx = 0; xx < 15; xx++) {
-          if (tileChar(draft, xx, yy) === "e") setTile(draft, xx, yy, " ");
-        }
-      }
-      setTile(draft, x, y, "e");
-      editorHint = "Exit set. Only one exit can be placed.";
-      return;
-    }
-    setTile(draft, x, y, tool.ch);
-    if (tool.ch === " ") {
-      draft.switches = draft.switches.filter((s) => !(s.x === x && s.y === y));
-      draft.splits = draft.splits.filter((s) => !(s.x === x && s.y === y));
-    }
-  }
+  paintState.tool = editorTool;
+  paintEditorCell(draft, x, y, paintState);
+  if (paintState.hint) editorHint = paintState.hint;
+  scheduleBeatCheck();
 }
 
 function playSaved(item: SavedStage, queue?: SavedStage[], index = 0): void {
@@ -1695,26 +1672,32 @@ function choosePuzzle(i: number): void {
 }
 
 function tryPastePlay(): void {
-  const def = decodeLevel(pasteBuf);
+  const def = parseShare(pasteBuf, onlineStages);
   if (!def) {
-    customMsg = "That code is not a valid stage.";
+    const short = pasteBuf.trim().toUpperCase().match(/^BXS-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/);
+    customMsg = short
+      ? "That seed isn’t on this device. Paste a BXS. or BX1 code, or open it from Offline / Online."
+      : "That code is not a valid stage.";
     sound.play("fail");
     return;
   }
   sound.play("click");
   playMode = "custom";
   customOrigin = "enterCode";
-  beginFromDef(def, true, "Shared Stage", "by share code");
+  beginFromDef(def, true, "Shared Stage", stageId(def));
 }
 
 function chooseSave(i: number): void {
   if (i === 0) {
     const name = editorName.trim() || "My Stage";
     const code = encodeLevel(draft);
-    saveStage({ name, author: player(), code, def: cloneDef(draft), source: "local" });
-    void navigator.clipboard?.writeText(code);
+    const seed = encodeSeed(draft);
+    const id = stageId(draft);
+    saveStage({ name, author: player(), code, seed: id, def: cloneDef(draft), source: "local" });
+    const copied = `${id}\n${seed}\n${code}`;
+    void navigator.clipboard?.writeText(copied);
     shareCode = code;
-    saveMsg = "Saved and copied to clipboard.";
+    saveMsg = "Saved. Seed copied to clipboard.";
     sound.play("click");
     screen = "creatorHub";
     creatorPage = "manage";
@@ -1752,6 +1735,7 @@ function tutorialBack(): void {
 
 function restartLevel(): void {
   if (!currentDef) return;
+  if (autoSolve) stopAutoSolve();
   if (playMode === "replay") {
     startReplay(replayStage, replayCmds);
     return;
@@ -1787,6 +1771,8 @@ function advanceSplash(): void {
 }
 
 function afterWin(): void {
+  stopAutoSolve();
+  playBanner = "";
   if (playMode === "replay") {
     exitReplay();
     return;
@@ -2099,6 +2085,11 @@ canvas.addEventListener("pointerdown", (e) => {
     const tool = renderer.hitEditorTool(p.x, p.y, EDITOR_TOOLS.length);
     if (tool !== null) {
       editorTool = EDITOR_TOOLS[tool].id;
+      paintState.tool = editorTool;
+      if (editorTool !== "split") {
+        paintState.splitStep = 0;
+        paintState.splitAt = null;
+      }
       sound.play("hover");
       return;
     }
@@ -2115,12 +2106,17 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (screen === "play") {
-    if (isDev() && renderer.hitDevTab(p.x, p.y)) {
+    if (showDevTools() && renderer.hitBeatTab(p.x, p.y)) {
+      startBeatForMe();
+      return;
+    }
+    if (showDevTools() && renderer.hitDevTab(p.x, p.y)) {
       openDevMenu();
       return;
     }
     if (renderer.hitMenuTab(p.x, p.y, playMode === "editor-test" || playMode === "replay")) {
       if (playMode === "editor-test") {
+        stopAutoSolve();
         screen = "editor";
         sound.play("click");
         sound.startMenu();
@@ -2180,7 +2176,7 @@ function pointerOverHit(p: { x: number; y: number }): boolean {
       return nav !== null;
     }
     case "play":
-      if (isDev() && playMode !== "replay" && renderer.hitDevTab(p.x, p.y)) return true;
+      if (showDevTools() && (renderer.hitBeatTab(p.x, p.y) || renderer.hitDevTab(p.x, p.y))) return true;
       return renderer.hitMenuTab(p.x, p.y, playMode === "editor-test" || playMode === "replay");
     case "devMenu":
       return (
@@ -2292,7 +2288,8 @@ canvas.addEventListener("pointermove", (e) => {
     menuHover = renderer.hitEditorTool(p.x, p.y, EDITOR_TOOLS.length);
   } else if (screen === "editorSave") menuHover = renderer.hitSavePrompt(p.x, p.y);
   else if (screen === "play") {
-    if (isDev() && playMode !== "replay" && renderer.hitDevTab(p.x, p.y)) extraHover = "dev";
+    if (showDevTools() && renderer.hitBeatTab(p.x, p.y)) extraHover = "beat";
+    else if (showDevTools() && renderer.hitDevTab(p.x, p.y)) extraHover = "dev";
     else if (renderer.hitMenuTab(p.x, p.y, playMode === "editor-test" || playMode === "replay")) extraHover = "tab";
   } else if (screen === "devMenu") {
     menuHover = renderer.hitDevMenuList(p.x, p.y, LEVELS.length, loadIndex);
@@ -2326,7 +2323,7 @@ canvas.addEventListener("pointermove", (e) => {
   canvas.style.cursor = pointerOverHit(p) ? "pointer" : "default";
   if (paintHeld && screen === "editor") {
     const cell = renderer.hitEditorCell(p.x, p.y);
-    if (cell && editorTool !== "link" && editorTool !== "spawn") paintCell(cell.x, cell.y);
+    if (cell && editorTool !== "link" && editorTool !== "spawn" && !(editorTool === "split" && paintState.splitStep > 0)) paintCell(cell.x, cell.y);
   }
 });
 
@@ -2446,7 +2443,7 @@ function pollPad(): void {
     return;
   }
   if (screen === "play") {
-    if (playMode === "replay") {
+    if (playMode === "replay" || autoSolve) {
       if (input.justPad("pause") || input.justPad("back")) openPause();
       return;
     }
@@ -2634,6 +2631,10 @@ function update(dt: number): void {
         if (playMode === "replay") {
           exitReplay();
           return;
+        }
+        if (autoSolve) {
+          stopAutoSolve();
+          playBanner = "Auto-solve failed";
         }
         if (!currentDef) return;
         const deaths = stage.attempts;
@@ -2835,13 +2836,16 @@ function draw(): void {
       editorCursor,
       extraHover === "test" || extraHover === "back" ? extraHover : null,
       menuHover,
+      stageId(draft),
+      beatStatus,
+      splitMarks(draft),
     );
     return;
   }
 
   if (screen === "editorSave") {
     renderer.drawBg("menu");
-    renderer.drawSavePrompt(shareCode, saveMsg || editorName, menuHover);
+    renderer.drawSavePrompt(shareCode, saveMsg || editorName, menuHover, stageId(draft));
     return;
   }
 
@@ -2880,15 +2884,20 @@ function draw(): void {
   if ((screen === "play" || screen === "pause" || screen === "devMenu") && stage) {
     renderer.drawBg("level");
     renderer.drawLevel(stage, playMode === "replay" ? ghosts.map((g) => g.stage) : []);
+    const hud = hudCode();
     renderer.drawHud(
-      stage.def.code,
+      hud.value,
       stage.moves,
       playMode === "editor-test" ? "Back to Editor" : playMode === "replay" ? "Exit" : "Menu",
       extraHover === "tab",
-      isDev() && playMode !== "editor-test" && playMode !== "replay",
+      showDevTools(),
       extraHover === "dev",
-      playMode === "replay",
+      playMode === "replay" || autoSolve,
       !!stage.split,
+      showDevTools(),
+      extraHover === "beat",
+      playBanner,
+      hud.label,
     );
     if (screen === "pause") {
       renderer.drawPause(
