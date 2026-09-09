@@ -36,6 +36,16 @@ import {
 } from "./history";
 import { Input } from "./input";
 import { Renderer, fitCamera, formatTime, MENU_COUNT, MENU_Y, PAUSE_COUNT } from "./render";
+import {
+  DIFFICULTIES,
+  RUN_LENGTHS,
+  dailySeed,
+  difficultyLabel,
+  generatePuzzle,
+  generateRun,
+  type Difficulty,
+  type Puzzle,
+} from "./generate";
 import { ACTION_LABEL, brandName, isDevName, loadSettings, saveSettings, type Action, type Settings } from "./settings";
 import type { LevelDef, SwitchMode } from "./levels";
 
@@ -57,11 +67,13 @@ type Screen =
   | "creatorHub"
   | "editor"
   | "editorSave"
-  | "devMenu";
+  | "devMenu"
+  | "puzzles";
 
 type CreatorPage = "root" | "create" | "play" | "enterCode" | "offline" | "online" | "manage" | "packEdit";
 
-type PlayMode = "campaign" | "custom" | "editor-test" | "replay";
+type PlayMode = "campaign" | "custom" | "editor-test" | "replay" | "puzzle";
+type PuzzlePage = "root" | "daily" | "seeded";
 
 const EDITOR_TOOLS = [
   { id: "erase", label: "Erase", ch: " " },
@@ -126,6 +138,16 @@ let ghosts: GhostRunner[] = [];
 let historyId = "";
 let feedingReplay = false;
 let runFlushed = false;
+let puzzlePage: PuzzlePage = "root";
+let puzzleIndex = 0;
+let puzzleDiff: Difficulty = "easy";
+let puzzleLength = 1;
+let puzzleSeed = "BLOX";
+let puzzleSeedFocus = false;
+let puzzleFocus: "seed" | "diff" | "length" | "play" = "diff";
+let puzzleQueue: Puzzle[] = [];
+let puzzleQueueIndex = 0;
+let puzzleMsg = "";
 let pendingResult: "ok" | "fail" | "win" | "split" | "assemble" | "scatter" | null = null;
 let busy = false;
 let splashT = 0;
@@ -165,7 +187,7 @@ let customQueue: SavedStage[] = [];
 let customQueueIndex = 0;
 let customOrigin: CreatorPage = "offline";
 let nameDraft = "";
-type ExtraHover = "enter" | "back" | "play" | "test" | "skip" | "next" | "prev" | "tab" | "dev" | "save" | "name" | "win" | "close" | "stats" | "ghosts" | null;
+type ExtraHover = "enter" | "back" | "play" | "test" | "skip" | "next" | "prev" | "tab" | "dev" | "save" | "name" | "win" | "close" | "stats" | "ghosts" | "seed" | null;
 let extraHover: ExtraHover = null;
 
 function now(): number {
@@ -543,9 +565,10 @@ function move(dir: Dir): void {
 }
 
 function swapBlock(): void {
-  if (!stage || screen !== "play" || busy) return;
+  if (!stage || screen !== "play") return;
   if (playMode === "replay" && !feedingReplay) return;
   if (!stage.split) return;
+  if (stage.anim && stage.anim.kind !== "splitdrop") return;
   stage.swapSplit();
   recordCmd("swap");
   sound.play("click", { volume: 0.5 });
@@ -602,6 +625,11 @@ function handlePlayResult(): void {
   }
   if (result === "split") {
     stage.beginSplit();
+    if (!stage.split) {
+      busy = false;
+      pendingResult = null;
+      return;
+    }
     busy = true;
     pendingResult = "split";
     return;
@@ -653,7 +681,7 @@ function typingText(): boolean {
   if (screen === "nameEntry" || screen === "editorSave") return true;
   if (screen === "editor" && editorNameFocus) return true;
   if (screen === "settings" && settingsNameFocus) return true;
-  if (screen === "creatorHub" && (creatorPage === "enterCode" || packNameFocus)) return true;
+  if (screen === "puzzles" && puzzleSeedFocus) return true;
   return false;
 }
 
@@ -847,6 +875,11 @@ function onKey(e: KeyboardEvent): void {
 
   if (screen === "history") {
     handleHistoryKey(e);
+    return;
+  }
+
+  if (screen === "puzzles") {
+    handlePuzzleKey(e);
     return;
   }
 
@@ -1112,11 +1145,16 @@ function chooseMenu(i: number): void {
     creatorPage = "root";
     screen = "creatorHub";
   } else if (i === 4) {
-    openHistory("list");
+    puzzlePage = "root";
+    puzzleIndex = 0;
+    puzzleMsg = "";
+    screen = "puzzles";
   } else if (i === 5) {
+    openHistory("list");
+  } else if (i === 6) {
     settingsIndex = 0;
     screen = "settings";
-  } else if (i === 6) {
+  } else if (i === 7) {
     const muted = sound.toggleMute();
     if (!muted) sound.startMenu();
   } else {
@@ -1166,8 +1204,9 @@ function choosePause(i: number): void {
     else if (playMode === "custom") {
       screen = "creatorHub";
       creatorPage = customQueue.length > 1 ? "manage" : "offline";
-    }
-    else {
+    } else if (playMode === "puzzle") {
+      screen = "puzzles";
+    } else {
       resumeAt = levelIndex;
       screen = "menu";
     }
@@ -1505,6 +1544,156 @@ function playSaved(item: SavedStage, queue?: SavedStage[], index = 0): void {
   beginFromDef(item.def, true, item.name, `by ${item.author}`);
 }
 
+function startPuzzleAt(index: number): void {
+  const p = puzzleQueue[index];
+  if (!p) return;
+  puzzleQueueIndex = index;
+  playMode = "puzzle";
+  const n = puzzleQueue.length;
+  const kind = puzzleQueue[0]?.seed.startsWith("daily:") ? "Daily" : "Seeded";
+  const title = n > 1 ? `${kind.toUpperCase()} ${String(index + 1).padStart(2, "0")}/${String(n).padStart(2, "0")}` : kind.toUpperCase();
+  beginFromDef(p.def, true, title, `${difficultyLabel(p.difficulty)} · ${p.solutionLen} moves`);
+}
+
+function launchPuzzles(list: Puzzle[]): void {
+  if (!list.length) {
+    puzzleMsg = "Could not build a puzzle. Try another seed.";
+    sound.play("fail");
+    return;
+  }
+  puzzleQueue = list;
+  puzzleMsg = "";
+  sound.play("click");
+  startPuzzleAt(0);
+}
+
+function playDaily(): void {
+  puzzleMsg = "Building today’s puzzle…";
+  const seed = dailySeed(new Date(), puzzleDiff);
+  launchPuzzles([generatePuzzle(seed, puzzleDiff)]);
+}
+
+function playSeeded(): void {
+  const seed = puzzleSeed.trim() || "BLOX";
+  puzzleMsg = "Building puzzles…";
+  launchPuzzles(generateRun(seed, puzzleDiff, puzzleLength));
+}
+
+function puzzleLabels(): string[] {
+  if (puzzlePage === "daily") return [...DIFFICULTIES.map(difficultyLabel), "Back"];
+  if (puzzlePage === "seeded") return [];
+  return ["Daily", "Seeded Run", "Back"];
+}
+
+function handlePuzzleKey(e: KeyboardEvent): void {
+  if (puzzlePage === "root") {
+    if (backKey(e.key)) {
+      screen = "menu";
+      sound.play("click");
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      puzzleIndex = (puzzleIndex + 1) % 3;
+      sound.play("hover");
+    } else if (e.key === "ArrowUp") {
+      puzzleIndex = (puzzleIndex + 2) % 3;
+      sound.play("hover");
+    } else if (confirmKey(e.key)) choosePuzzle(puzzleIndex);
+    return;
+  }
+  if (puzzlePage === "daily") {
+    const n = DIFFICULTIES.length + 1;
+    if (backKey(e.key)) {
+      puzzlePage = "root";
+      puzzleIndex = 0;
+      sound.play("click");
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      puzzleIndex = (puzzleIndex + 1) % n;
+      sound.play("hover");
+    } else if (e.key === "ArrowUp") {
+      puzzleIndex = (puzzleIndex + n - 1) % n;
+      sound.play("hover");
+    } else if (confirmKey(e.key)) {
+      if (puzzleIndex >= DIFFICULTIES.length) {
+        puzzlePage = "root";
+        puzzleIndex = 0;
+      } else {
+        puzzleDiff = DIFFICULTIES[puzzleIndex];
+        playDaily();
+      }
+    }
+    return;
+  }
+  if (puzzleSeedFocus) {
+    if (e.key === "Escape" || e.key === "Enter") {
+      puzzleSeedFocus = false;
+      puzzleFocus = "diff";
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Backspace") {
+      puzzleSeed = puzzleSeed.slice(0, -1);
+      e.preventDefault();
+      return;
+    }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && puzzleSeed.length < 24) {
+      puzzleSeed += e.key;
+      e.preventDefault();
+    }
+    return;
+  }
+  if (backKey(e.key)) {
+    puzzlePage = "root";
+    puzzleIndex = 1;
+    sound.play("click");
+    return;
+  }
+  if (e.key === "ArrowDown") {
+    if (puzzleFocus === "seed") puzzleFocus = "diff";
+    else if (puzzleFocus === "diff") puzzleFocus = "length";
+    else if (puzzleFocus === "length") puzzleFocus = "play";
+    else puzzleFocus = "seed";
+    sound.play("hover");
+  } else if (e.key === "ArrowUp") {
+    if (puzzleFocus === "play") puzzleFocus = "length";
+    else if (puzzleFocus === "length") puzzleFocus = "diff";
+    else if (puzzleFocus === "diff") puzzleFocus = "seed";
+    else puzzleFocus = "play";
+    sound.play("hover");
+  } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    const dir = e.key === "ArrowRight" ? 1 : -1;
+    if (puzzleFocus === "diff") {
+      const i = DIFFICULTIES.indexOf(puzzleDiff);
+      puzzleDiff = DIFFICULTIES[(i + dir + DIFFICULTIES.length) % DIFFICULTIES.length];
+    } else if (puzzleFocus === "length") {
+      const i = RUN_LENGTHS.indexOf(puzzleLength as (typeof RUN_LENGTHS)[number]);
+      const ni = (Math.max(0, i) + dir + RUN_LENGTHS.length) % RUN_LENGTHS.length;
+      puzzleLength = RUN_LENGTHS[ni];
+    }
+    sound.play("hover");
+  } else if (confirmKey(e.key)) {
+    if (puzzleFocus === "seed") puzzleSeedFocus = true;
+    else playSeeded();
+  }
+}
+
+function choosePuzzle(i: number): void {
+  sound.play("click");
+  if (i === 0) {
+    puzzlePage = "daily";
+    puzzleIndex = DIFFICULTIES.indexOf(puzzleDiff);
+    puzzleMsg = "";
+  } else if (i === 1) {
+    puzzlePage = "seeded";
+    puzzleFocus = "seed";
+    puzzleMsg = "";
+  } else {
+    screen = "menu";
+  }
+}
+
 function tryPastePlay(): void {
   const def = decodeLevel(pasteBuf);
   if (!def) {
@@ -1621,6 +1810,16 @@ function afterWin(): void {
     sound.startMenu();
     return;
   }
+  if (playMode === "puzzle") {
+    if (puzzleQueueIndex + 1 < puzzleQueue.length) {
+      startPuzzleAt(puzzleQueueIndex + 1);
+      return;
+    }
+    puzzleMsg = puzzleQueue.length > 1 ? "Run complete." : "Puzzle complete.";
+    screen = "puzzles";
+    sound.startMenu();
+    return;
+  }
   recordWonLevel();
   beginCampaign(levelIndex + 1, true);
 }
@@ -1701,6 +1900,62 @@ canvas.addEventListener("pointerdown", (e) => {
     if (hit !== null) {
       historyIndex = hit;
       chooseHistory(hit);
+    }
+    return;
+  }
+  if (screen === "puzzles") {
+    if (puzzlePage === "root") {
+      const hit = renderer.hitCreatorHub(p.x, p.y, 3);
+      if (hit !== null) {
+        puzzleIndex = hit;
+        choosePuzzle(hit);
+      }
+      return;
+    }
+    if (puzzlePage === "daily") {
+      const n = DIFFICULTIES.length + 1;
+      const hit = renderer.hitCreatorHub(p.x, p.y, n);
+      if (hit !== null) {
+        puzzleIndex = hit;
+        if (hit >= DIFFICULTIES.length) {
+          puzzlePage = "root";
+          puzzleIndex = 0;
+          sound.play("click");
+        } else {
+          puzzleDiff = DIFFICULTIES[hit];
+          playDaily();
+        }
+      }
+      return;
+    }
+    if (renderer.hitListBack(p.x, p.y)) {
+      puzzlePage = "root";
+      puzzleIndex = 1;
+      sound.play("click");
+      return;
+    }
+    if (renderer.hitPuzzleSeed(p.x, p.y)) {
+      puzzleSeedFocus = true;
+      puzzleFocus = "seed";
+      sound.play("click");
+      return;
+    }
+    if (renderer.hitPuzzlePlay(p.x, p.y)) {
+      playSeeded();
+      return;
+    }
+    const d = renderer.hitPuzzleDiff(p.x, p.y, true);
+    if (d !== null) {
+      puzzleDiff = DIFFICULTIES[d];
+      puzzleFocus = "diff";
+      sound.play("hover");
+      return;
+    }
+    const len = renderer.hitPuzzleLength(p.x, p.y, true);
+    if (len !== null) {
+      puzzleLength = RUN_LENGTHS[len];
+      puzzleFocus = "length";
+      sound.play("hover");
     }
     return;
   }
@@ -1957,6 +2212,16 @@ function pointerOverHit(p: { x: number; y: number }): boolean {
         renderer.hitListBack(p.x, p.y) ||
         renderer.hitStageList(p.x, p.y, historyRows().length, historyIndex) !== null
       );
+    case "puzzles":
+      if (puzzlePage === "root") return renderer.hitCreatorHub(p.x, p.y, 3) !== null;
+      if (puzzlePage === "daily") return renderer.hitCreatorHub(p.x, p.y, DIFFICULTIES.length + 1) !== null;
+      return (
+        renderer.hitListBack(p.x, p.y) ||
+        renderer.hitPuzzlePlay(p.x, p.y) ||
+        renderer.hitPuzzleSeed(p.x, p.y) ||
+        renderer.hitPuzzleDiff(p.x, p.y, true) !== null ||
+        renderer.hitPuzzleLength(p.x, p.y, true) !== null
+      );
     default:
       return false;
   }
@@ -2043,6 +2308,20 @@ canvas.addEventListener("pointermove", (e) => {
     if (renderer.hitGhostsToggle(p.x, p.y)) extraHover = "ghosts";
     else if (renderer.hitListBack(p.x, p.y)) extraHover = "back";
     else menuHover = renderer.hitStageList(p.x, p.y, historyRows().length, historyIndex);
+  } else if (screen === "puzzles") {
+    extraHover = null;
+    if (puzzlePage === "root") menuHover = renderer.hitCreatorHub(p.x, p.y, 3);
+    else if (puzzlePage === "daily") menuHover = renderer.hitCreatorHub(p.x, p.y, DIFFICULTIES.length + 1);
+    else {
+      if (renderer.hitPuzzlePlay(p.x, p.y)) extraHover = "play";
+      else if (renderer.hitListBack(p.x, p.y)) extraHover = "back";
+      else if (renderer.hitPuzzleSeed(p.x, p.y)) extraHover = "seed";
+      else {
+        const d = renderer.hitPuzzleDiff(p.x, p.y, true);
+        const len = renderer.hitPuzzleLength(p.x, p.y, true);
+        menuHover = d ?? len;
+      }
+    }
   }
   canvas.style.cursor = pointerOverHit(p) ? "pointer" : "default";
   if (paintHeld && screen === "editor") {
@@ -2196,6 +2475,24 @@ function pollPad(): void {
       saveSeeGhosts(seeGhosts);
       sound.play("click");
     }
+    return;
+  }
+  if (screen === "puzzles") {
+    handlePuzzleKey({
+      key: input.justPad("down")
+        ? "ArrowDown"
+        : input.justPad("up")
+          ? "ArrowUp"
+          : input.justPad("left")
+            ? "ArrowLeft"
+            : input.justPad("right")
+              ? "ArrowRight"
+              : input.justPad("confirm")
+                ? "Enter"
+                : input.justPad("back")
+                  ? "Escape"
+                  : "",
+    } as KeyboardEvent);
     return;
   }
   if (screen === "devMenu") {
@@ -2499,6 +2796,32 @@ function draw(): void {
     return;
   }
 
+  if (screen === "puzzles") {
+    renderer.drawBg("menu");
+    if (puzzlePage === "root") {
+      renderer.drawCreatorHub("Puzzles", puzzleLabels(), puzzleIndex, menuHover);
+    } else if (puzzlePage === "daily") {
+      const d = new Date();
+      const stamp = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      renderer.drawCreatorHub(`Daily  ·  ${stamp}`, puzzleLabels(), puzzleIndex, menuHover);
+    } else {
+      renderer.drawPuzzleSetup(
+        "Seeded Run",
+        puzzleMsg || "Same seed always builds the same stages.",
+        puzzleSeedFocus ? `${puzzleSeed}_` : puzzleSeed,
+        DIFFICULTIES.map(difficultyLabel),
+        DIFFICULTIES.indexOf(puzzleDiff),
+        RUN_LENGTHS.map((n) => (n === 1 ? "1 stage" : `${n} stages`)),
+        Math.max(0, RUN_LENGTHS.indexOf(puzzleLength as (typeof RUN_LENGTHS)[number])),
+        true,
+        true,
+        puzzleFocus,
+        extraHover === "play" || extraHover === "back" || extraHover === "seed" ? extraHover : null,
+      );
+    }
+    return;
+  }
+
   if (screen === "editor") {
     renderer.drawBg("menu");
     renderer.drawEditor(
@@ -2565,6 +2888,7 @@ function draw(): void {
       isDev() && playMode !== "editor-test" && playMode !== "replay",
       extraHover === "dev",
       playMode === "replay",
+      !!stage.split,
     );
     if (screen === "pause") {
       renderer.drawPause(

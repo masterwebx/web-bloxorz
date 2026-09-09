@@ -4,9 +4,11 @@ A browser remake of Damien Clarke's 2007 puzzle game **Bloxorz**. All 33 origina
 
 On first launch you enter a name. The title becomes that name plus **ORZ** — Wex is **WEXORZ**, David is **DAVIDORZ**. Change it later in Settings.
 
-Set the name to **DEV** (any case) to unlock developer tools: **Load Stage** becomes a 33-stage list, and in-game **Dev Menu** jumps between stages or force-wins. A short jingle plays when you first set the name to DEV so you know it unlocked. Mechanics coverage vs the original Flash game is in `AUDIT.md`. `npm test` runs the engine unit tests.
+Set the name to **DEV** (any case) to unlock developer tools: **Load Stage** becomes a 33-stage list, and in-game **Dev Menu** jumps between stages or force-wins. A short jingle plays when you first set the name to DEV so you know it unlocked. Mechanics coverage vs the original Flash game is in `AUDIT.md`. `npm test` plays the [official 33-stage walkthrough](https://www.freewebarcade.com/help/bloxorz-walkthrough.php) and BFS-solves every campaign stage so splits, switches, bridges, and orange tiles stay honest.
 
 Each death counts as an attempt (shown on the pause screen). Finishing the campaign freezes the time on the congratulations screen; **Show Stats** lists how long each stage took. **History** on the main menu stores previous campaign runs so you can replay a stage’s winning route. Turn on **See ghosts** to overlay your other tries on that replay, Super Meat Boy style.
+
+**Puzzles** generates new stages from a seed (BFS-verified, same idea as the [Bloxorz search-agent paper](https://www.sciencedirect.com/science/article/pii/S187705091932160X)). **Daily** is today’s UTC date plus a difficulty. **Seeded Run** takes any seed and 1, 5, or 10 stages at Easy / Medium / Hard / Insane.
 
 This project reconstructs the Flash game using:
 
@@ -28,6 +30,15 @@ Bloxorz was created by Damien Clarke / DX Interactive (21 June 2007). This is an
 Passcodes sit in the top-right of each stage. Open **Load Stage** from the menu and type a six-digit code to jump there.
 
 **Settings** has your player name, music and SFX sliders, rumble on/off, and keyboard/gamepad remapping.
+
+## Puzzles
+
+**Puzzles** on the main menu has **Daily** and **Seeded Run**.
+
+- **Daily** — one new stage per UTC day at Easy, Medium, Hard, or Insane. Everyone with the same date and difficulty gets the same map.
+- **Seeded Run** — type a seed, pick a difficulty, and play 1, 5, or 10 generated stages. The same seed always rebuilds the same run.
+
+Maps are grown as connected tiles, then a BFS solver (the same search used in the 2019 Bloxorz pathfinding paper) keeps only stages that actually reach the hole. Harder difficulties add orange tiles, switches/bridges, and split pads.
 
 ## Stage Creator
 

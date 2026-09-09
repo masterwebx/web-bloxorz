@@ -235,7 +235,8 @@ export class Stage {
   }
 
   swapSplit(): void {
-    if (!this.split || this.anim) return;
+    if (!this.split) return;
+    if (this.anim && this.anim.kind !== "splitdrop") return;
     this.active = this.active === 0 ? 1 : 0;
     this.selectTimer = 0.45;
   }
@@ -313,7 +314,9 @@ export class Stage {
   }
 
   beginSplit(): void {
-    const pad = this.def.splits.find((s) => s.x === this.block.x && s.y === this.block.y);
+    const pad =
+      this.def.splits.find((s) => s.x === this.block.x && s.y === this.block.y) ??
+      this.def.splits.find((s) => this.tileAt(s.x, s.y) === "split");
     if (!pad) return;
     this.split = true;
     this.active = 0;

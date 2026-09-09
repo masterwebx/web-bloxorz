@@ -2,7 +2,9 @@
 
 Compared the original Flash 8 / ActionScript 2 SWF (`levelcodes`, tile movie clips, `softswitch` / `hardswitch` / `splitswitch` / `doorblockl` / `doorblockr`, `rejoinblocks`) with this Canvas port.
 
-Unit tests live in `src/engine.test.ts`. Run `npm test`.
+Unit tests live in `src/engine.test.ts`, `src/campaign.test.ts`, `src/generate.test.ts`, and `src/history.test.ts`. Run `npm test`.
+
+The campaign suite replays the Free Web Arcade / JayIsGames solutions on all 33 stages (stage 03 uses a BFS-verified path because the published FAQ falls off this GBA reconstruction) and separately BFS-solves every stage so split / switch / orange mechanics cannot silently break.
 
 | AS2 feature / mechanic | HTML5 port | Unit test |
 | --- | --- | --- |
@@ -29,10 +31,13 @@ Unit tests live in `src/engine.test.ts`. Run `npm test`.
 | Bridges L/R (`doorblockl/r`) | Yes | Yes — `l/r` start off, `k/q` start on |
 | Switch modes toggle / open / close | Yes (`onoff` / `on` / `off`) | Yes — `nextBridge` |
 | Stay-off switch still keeps bridge | Yes | Indirect |
-| Split teleport (`splitswitch`) | Yes | Yes — `beginSplit` |
-| Space toggles small cubes | Yes | Yes — `swapSplit` |
+| Split teleport (`splitswitch`) | Yes | Yes — `beginSplit` + official walkthrough stages 08–10, 15, 16, 20, 23, 24, 26, 28 |
+| Space toggles small cubes | Yes, HUD hint while split | Yes — `swapSplit` + walkthrough `S` |
 | Rejoin when adjacent (`rejoinblocks`) | Yes | Yes |
 | Split cube falls off | Yes | Yes |
+| Official 33-stage walkthrough | Yes | Yes — `src/campaign.test.ts` |
+| BFS reachability of every hole | Yes | Yes — `solveLevel` on all 33 |
+| Seeded / daily generated puzzles | HTML5 extra | Yes — `generate.test.ts` |
 | Orange / fragile tiles | Yes — fail if standing | Yes |
 | Lie across orange | Yes | Yes |
 | Tile assemble / scatter intro | Yes | No |

@@ -21,9 +21,9 @@ const TILE_OX = -2;
 const TILE_OY = -6;
 const GROUND = 0.04;
 const MENU_X = 42;
-export const MENU_Y = 156;
+export const MENU_Y = 148;
 export const MENU_GAP = 22;
-export const MENU_COUNT = 8;
+export const MENU_COUNT = 9;
 export const PAUSE_COUNT = 4;
 export const LIST_Y0 = 148;
 export const LIST_GAP = 22;
@@ -781,12 +781,14 @@ export class Renderer {
     showDev = false,
     devHot = false,
     replay = false,
+    splitHint = false,
   ): void {
     this.drawMenuTab(tab, tabHot);
     if (showDev) this.drawUiText("Dev Menu", 14, 42, { size: 13, color: "#111", hot: devHot });
     this.drawUiText(`Passcode: ${code}`, 536, 18, { size: 13, align: "right", color: "#111" });
     this.drawUiText(`Moves: ${String(moves).padStart(6, "0")}`, 536, 36, { size: 13, align: "right", color: "#111" });
     if (replay) this.drawUiText("Replay", 536, 54, { size: 13, align: "right", color: "#111" });
+    if (splitHint) this.drawUiText("Space: switch cube", 14, 64, { size: 13, color: "#111" });
   }
 
   drawMenuTab(label = "Menu", hot = false): void {
@@ -877,6 +879,7 @@ export class Renderer {
       "Resume Game",
       "Load Stage",
       "Stage Creator",
+      "Puzzles",
       "History",
       "Settings",
       "Toggle Sound",
@@ -890,7 +893,7 @@ export class Renderer {
       this.ctx.globalAlpha = dim ? 0.32 : 1;
       if (selected === i && !dim) this.drawUiText(">", MENU_X - 16, y + 16, { size: 14, hot });
       this.drawUiText(label, MENU_X + 4, y + 16, { size: 14, hot });
-      if (i === 6) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 14, hot });
+      if (i === 7) this.drawUiText(muted ? "Off" : "On", MENU_X + 172, y + 16, { size: 14, hot });
       this.ctx.restore();
     });
   }
@@ -1275,6 +1278,68 @@ export class Renderer {
 
   hitGhostsToggle(mx: number, my: number): boolean {
     return my >= 110 && my <= 140 && mx > STAGE_W - 220;
+  }
+
+  drawPuzzleSetup(
+    title: string,
+    subtitle: string,
+    seed: string,
+    diffs: string[],
+    diffIndex: number,
+    lengths: string[],
+    lengthIndex: number,
+    showSeed: boolean,
+    showLength: boolean,
+    focus: "seed" | "diff" | "length" | "play",
+    extraHot: "play" | "back" | "seed" | null,
+  ): void {
+    this.drawUiText(title, 42, 128, { size: 18 });
+    this.drawUiText(subtitle, 42, 154, { size: 12, weight: "500" });
+    if (showSeed) {
+      this.drawUiText(`Seed: ${seed || "_" }`, 42, 186, { size: 14, hot: extraHot === "seed" || focus === "seed" });
+    }
+    const y0 = showSeed ? 218 : 186;
+    diffs.forEach((label, i) => {
+      const y = y0 + i * 22;
+      const hot = focus === "diff" && diffIndex === i;
+      if (i === diffIndex) this.drawUiText(">", 28, y, { size: 13, hot });
+      this.drawUiText(label, 48, y, { size: 13, hot });
+    });
+    if (showLength) {
+      this.drawUiText("Stages", 280, y0, { size: 13, weight: "500" });
+      lengths.forEach((label, i) => {
+        const y = y0 + i * 22;
+        const hot = focus === "length" && lengthIndex === i;
+        if (i === lengthIndex && focus === "length") this.drawUiText(">", 260, y, { size: 13, hot });
+        this.drawUiText(label, 300, y, { size: 13, hot });
+      });
+    }
+    this.drawUiText("Play", 42, 360, { size: 15, hot: extraHot === "play" || focus === "play" });
+    this.drawUiText("Back", 42, 386, { size: 13, hot: extraHot === "back" });
+  }
+
+  hitPuzzlePlay(mx: number, my: number): boolean {
+    return my >= 344 && my <= 372 && mx >= 28 && mx <= 140;
+  }
+
+  hitPuzzleSeed(mx: number, my: number): boolean {
+    return my >= 170 && my <= 200 && mx >= 28 && mx <= 420;
+  }
+
+  hitPuzzleDiff(mx: number, my: number, showSeed: boolean): number | null {
+    if (mx < 28 || mx > 220) return null;
+    const y0 = showSeed ? 204 : 172;
+    const i = Math.floor((my - y0) / 22);
+    if (i < 0 || i >= 4) return null;
+    return i;
+  }
+
+  hitPuzzleLength(mx: number, my: number, showSeed: boolean): number | null {
+    if (mx < 250 || mx > 420) return null;
+    const y0 = showSeed ? 204 : 172;
+    const i = Math.floor((my - y0) / 22);
+    if (i < 0 || i >= 3) return null;
+    return i;
   }
 
   hitPause(mx: number, my: number): number | null {
