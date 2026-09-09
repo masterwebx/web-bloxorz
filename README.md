@@ -12,11 +12,12 @@ Each death counts as an attempt (shown on the pause screen). Finishing the campa
 
 This project reconstructs the Flash game using:
 
-- Original tile, logo, tutorial, and UI graphics extracted from the SWF
+- Original tile, block, logo, tutorial, and UI graphics extracted from the SWF
+- Original isometric projection (30 / 10 / 16 / −5) and sprite registration from the Coolmath HTML5 export
+- Original clonks, switches, bridges, land/sink/fail, and **menu-only** music (no in-game BGM)
 - Stage layouts and switch logic from [Jacob Coughenour's GBA port](https://github.com/jacobcoughenour/bloxorz_gba)
-- Canvas isometric rendering of the rolling 1×1×2 block
 
-Bloxorz was created by Damien Clarke / DX Interactive (21 June 2007). This is an unofficial fan remake.
+Bloxorz was created by Damien Clarke / DX Interactive (21 June 2007). This is an unofficial fan remake. Stage Creator, puzzles, history/ghosts, DEV tools, and gamepad support are extras on top of that look.
 
 ## How to play
 

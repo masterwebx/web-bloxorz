@@ -507,7 +507,7 @@ function manageRows(): { label: string; kind: "packNew" | "stage" | "pack"; stag
 function settingsRows(): { label: string; value: string }[] {
   const rows = [
     { label: "Name", value: settingsNameFocus ? `${settings.playerName}_` : player() },
-    { label: "Music", value: `${Math.round(settings.music * 100)}%` },
+    { label: "Menu music", value: `${Math.round(settings.music * 100)}%` },
     { label: "Sound FX", value: `${Math.round(settings.sfx * 100)}%` },
     { label: "Rumble", value: settings.rumble ? "On" : "Off" },
   ];
@@ -625,33 +625,16 @@ function swapBlock(): void {
 
 function handlePlayResult(): void {
   if (!stage) return;
+  const wasSplit = stage.split;
+  const movingTo = stage.anim?.to;
   const result = stage.finishMove((opened, closed) => {
     if (opened) sound.play("bridge_enabled");
     if (closed) sound.play("bridge_disabled");
-    if (opened || closed) {
-      sound.play("hover", { volume: 0.5 });
-      input.rumble(80, 0.2, 0.35);
-    }
+    if (opened || closed) input.rumble(80, 0.2, 0.35);
   });
-  const cells = stage.split
-    ? [stage.active === 0 ? stage.cubeA : stage.cubeB]
-    : stage.block
-      ? [
-          { x: stage.block.x, y: stage.block.y },
-          ...(stage.block.ori === "up"
-            ? []
-            : stage.block.ori === "forward"
-              ? [{ x: stage.block.x, y: stage.block.y + 1 }]
-              : [{ x: stage.block.x + 1, y: stage.block.y }]),
-        ]
-      : [];
-  const hollow = cells.some((c) => {
-    const t = stage!.tileAt(c.x, c.y);
-    return t === "fragile" || t === "bridgeL" || t === "bridgeR";
-  });
-  sound.move(hollow);
 
   if (playMode !== "replay") sessionMoves += 1;
+
   if (result === "win") {
     sound.play("whoosh", { volume: 0.95 });
     input.rumble(220, 0.45, 0.4);
@@ -665,6 +648,8 @@ function handlePlayResult(): void {
       sessionFails++;
       stage.attempts++;
     }
+    const dest = movingTo ?? (stage.split ? (stage.active === 0 ? stage.cubeA : stage.cubeB) : stage.block);
+    if (stage.tileAt(dest.x, dest.y) === "fragile") sound.play("fragile_break");
     sound.play("fail");
     input.rumble(340, 0.85, 0.7);
     stage.beginFall();
@@ -672,7 +657,30 @@ function handlePlayResult(): void {
     pendingResult = "fail";
     return;
   }
+
+  if (wasSplit && !stage.split) {
+    if (movingTo) sound.landTile(stage.tileAt(movingTo.x, movingTo.y), true, true);
+    sound.play("unsplit");
+    if (stage.block.ori === "forward") sound.play("join_far");
+    else sound.play("join_long");
+  } else if (wasSplit && movingTo) {
+    sound.landTile(stage.tileAt(movingTo.x, movingTo.y), true, true);
+  } else if (stage.block) {
+    const upright = stage.block.ori === "up";
+    for (const c of [
+      { x: stage.block.x, y: stage.block.y },
+      ...(stage.block.ori === "up"
+        ? []
+        : stage.block.ori === "forward"
+          ? [{ x: stage.block.x, y: stage.block.y + 1 }]
+          : [{ x: stage.block.x + 1, y: stage.block.y }]),
+    ]) {
+      sound.landTile(stage.tileAt(c.x, c.y), upright, false);
+    }
+  }
+
   if (result === "split") {
+    sound.play("whoosh_2");
     stage.beginSplit();
     if (!stage.split) {
       busy = false;
@@ -1758,6 +1766,7 @@ function unlock(): void {
   sound.unlock();
   screen = "author";
   splashT = 0;
+  sound.play("splash", { volume: 0.75 });
 }
 
 function advanceSplash(): void {
@@ -2625,7 +2634,7 @@ function update(dt: number): void {
       } else if (kind === "drop" || kind === "splitdrop") {
         stage.anim = null;
         busy = false;
-        if (kind === "splitdrop") sound.play("whoosh_2");
+        if (kind === "splitdrop") sound.play("drop_in", { volume: 0.7 });
       } else if (kind === "fall" && pendingResult === "fail") {
         stage.anim = null;
         if (playMode === "replay") {
@@ -2648,7 +2657,7 @@ function update(dt: number): void {
         stage.beginScatter();
         pendingResult = "scatter";
         busy = true;
-        sound.play("whoosh_2", { volume: 0.85 });
+        sound.play("win", { volume: 0.9 });
       }
     }
     if (pendingResult === "scatter" && stage.scatter >= 1) {
@@ -2672,7 +2681,7 @@ function draw(): void {
   const brand = brandName(screen === "nameEntry" ? nameDraft : settings.playerName);
   const drawMark = (x: number, y: number) => {
     const w = renderer.drawLogo(x, y, brand, logoNeonR, logoNeonZ, glitchX);
-    renderer.drawSpinningBox(spinT, Math.min(STAGE_W - 64, x + w + 28), y + 28);
+    renderer.drawSpinBlock(Math.floor(spinT * 12), Math.min(STAGE_W - 40, x + w + 52), y + 44);
   };
 
   if (screen === "boot") {

@@ -41,9 +41,9 @@ The campaign suite replays the Free Web Arcade / JayIsGames solutions on all 33 
 | Orange / fragile tiles | Yes — fail if standing | Yes |
 | Lie across orange | Yes | Yes |
 | Tile assemble / scatter intro | Yes | No |
-| Shadows | Lighting on 3D cuboid | No |
-| Music / SFX | Yes | No |
-| Menu + spinning block | Yes (3D cuboid) | No |
+| Shadows | Tile diamonds under occupied cells | No |
+| Music / SFX | Original menu Music + clonk/switch/bridge/fail set; extras keep splash + DEV jingle | No |
+| Menu + spinning block | Original spin sprite frames | No |
 | Author / publisher splash | Author card only | No |
 | Congratulations stats | Yes | No |
 | Gamepad / rumble | HTML5 extra | No |
