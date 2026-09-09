@@ -245,7 +245,7 @@ export class Stage {
     this.anim = {
       kind: "drop",
       t: 0,
-      dur: 0.47,
+      dur: 0.38,
       from: { ...this.block },
       to: { ...this.block },
     };

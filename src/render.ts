@@ -12,21 +12,14 @@ import {
   W,
 } from "./engine";
 
-/** Original HTML5/Flash isometric: pos(x,y) = [x*30 + y*10, y*16 - x*5]. */
-const SX = 30;
+const SX = 32.5;
 const SYX = -5;
 const SXY = 10;
-const SY = 16;
+const SY = 17.5;
 const SZ = 23;
-const TILE_OX = -25;
-const TILE_OY = -16;
-const BLOCK_OX = -91;
-const BLOCK_OY = -115;
-const CUBE_OX = -90;
-const CUBE_OY = -114;
-const BRIDGE_OX = -91;
-const BRIDGE_OY = -115;
-const ORIG_H = 300;
+const TILE_OX = -2;
+const TILE_OY = -6;
+const GROUND = 0.04;
 const MENU_X = 42;
 export const MENU_Y = 148;
 export const MENU_GAP = 22;
@@ -80,16 +73,16 @@ export function fitCamera(stage: Stage): Camera {
       const t = stage.tileAt(x, y);
       if (t === "empty") continue;
       const p = project(x, y, 0);
-      minX = Math.min(minX, p.x + TILE_OX);
-      maxX = Math.max(maxX, p.x + TILE_OX + 50);
-      minY = Math.min(minY, p.y + TILE_OY);
-      maxY = Math.max(maxY, p.y + TILE_OY + 34);
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x + 50);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y + 34);
     }
   }
   if (!Number.isFinite(minX)) return { x: 80, y: 80 };
   return {
     x: STAGE_W / 2 - (minX + maxX) / 2,
-    y: ORIG_H / 2 - (minY + maxY) / 2,
+    y: STAGE_H / 2 - (minY + maxY) / 2 + 18,
   };
 }
 
@@ -145,6 +138,201 @@ function easeOutBack(t: number): number {
   return 1 + c * p * p * p + (c - 1) * p * p;
 }
 
+function rotateAround(
+  p: [number, number, number],
+  origin: [number, number, number],
+  axis: [number, number, number],
+  angle: number,
+): [number, number, number] {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const [ox, oy, oz] = origin;
+  const x = p[0] - ox;
+  const y = p[1] - oy;
+  const z = p[2] - oz;
+  const [ax, ay, az] = axis;
+  const dot = x * ax + y * ay + z * az;
+  const cx = ay * z - az * y;
+  const cy = az * x - ax * z;
+  const cz = ax * y - ay * x;
+  return [
+    ox + x * c + cx * s + ax * dot * (1 - c),
+    oy + y * c + cy * s + ay * dot * (1 - c),
+    oz + z * c + cz * s + az * dot * (1 - c),
+  ];
+}
+
+function boxFor(block: BlockState, cube = false): { x: number; y: number; z: number; w: number; d: number; h: number } {
+  if (cube) return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 1 };
+  if (block.ori === "up") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 1, h: 2 };
+  if (block.ori === "forward") return { x: block.x, y: block.y, z: GROUND, w: 1, d: 2, h: 1 };
+  return { x: block.x, y: block.y, z: GROUND, w: 2, d: 1, h: 1 };
+}
+
+function rollSpec(from: BlockState, dir: Dir, cube: boolean): {
+  origin: [number, number, number];
+  axis: [number, number, number];
+  angle: number;
+} {
+  const b = boxFor(from, cube);
+  const z = b.z;
+  if (dir === "right") return { origin: [b.x + b.w, b.y, z], axis: [0, 1, 0], angle: Math.PI / 2 };
+  if (dir === "left") return { origin: [b.x, b.y, z], axis: [0, 1, 0], angle: -Math.PI / 2 };
+  if (dir === "down") return { origin: [b.x, b.y + b.d, z], axis: [1, 0, 0], angle: -Math.PI / 2 };
+  return { origin: [b.x, b.y, z], axis: [1, 0, 0], angle: Math.PI / 2 };
+}
+
+function boxCorners(
+  box: { x: number; y: number; z: number; w: number; d: number; h: number },
+  roll?: { origin: [number, number, number]; axis: [number, number, number]; angle: number },
+): [number, number, number][] {
+  const pts: [number, number, number][] = [
+    [box.x, box.y, box.z],
+    [box.x + box.w, box.y, box.z],
+    [box.x + box.w, box.y + box.d, box.z],
+    [box.x, box.y + box.d, box.z],
+    [box.x, box.y, box.z + box.h],
+    [box.x + box.w, box.y, box.z + box.h],
+    [box.x + box.w, box.y + box.d, box.z + box.h],
+    [box.x, box.y + box.d, box.z + box.h],
+  ];
+  if (!roll) return pts;
+  return pts.map((p) => rotateAround(p, roll.origin, roll.axis, roll.angle));
+}
+
+const FACES: number[][] = [
+  [4, 5, 6, 7],
+  [0, 3, 2, 1],
+  [0, 1, 5, 4],
+  [1, 2, 6, 5],
+  [2, 3, 7, 6],
+  [3, 0, 4, 7],
+];
+
+function sampleBilinear(img: ImageData, x: number, y: number): [number, number, number, number] {
+  const w = img.width;
+  const h = img.height;
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(x)));
+  const y0 = Math.max(0, Math.min(h - 1, Math.floor(y)));
+  const x1 = Math.max(0, Math.min(w - 1, x0 + 1));
+  const y1 = Math.max(0, Math.min(h - 1, y0 + 1));
+  const fx = x - Math.floor(x);
+  const fy = y - Math.floor(y);
+  const at = (ix: number, iy: number): [number, number, number, number] => {
+    const i = (iy * w + ix) * 4;
+    return [img.data[i], img.data[i + 1], img.data[i + 2], img.data[i + 3]];
+  };
+  const a = at(x0, y0);
+  const b = at(x1, y0);
+  const c = at(x0, y1);
+  const d = at(x1, y1);
+  const mix = (p: number[], q: number[], t: number) => p.map((v, i) => p[i] + (q[i] - v) * t);
+  const top = mix(a, b, fx);
+  const bot = mix(c, d, fx);
+  const out = mix(top, bot, fy);
+  return [out[0], out[1], out[2], out[3]];
+}
+
+function insetQuad(
+  pts: { x: number; y: number }[],
+  t: number,
+): { x: number; y: number }[] {
+  const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+  const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+  return pts.map((p) => ({ x: p.x + (cx - p.x) * t, y: p.y + (cy - p.y) * t }));
+}
+
+function unprojectQuad(
+  src: HTMLCanvasElement,
+  quad: { x: number; y: number }[],
+  tw: number,
+  th: number,
+): HTMLCanvasElement {
+  const g = src.getContext("2d")!;
+  const img = g.getImageData(0, 0, src.width, src.height);
+  const q = insetQuad(quad, 0.1);
+  const c = document.createElement("canvas");
+  c.width = tw;
+  c.height = th;
+  const out = c.getContext("2d")!;
+  const dst = out.createImageData(tw, th);
+  let sr = 0;
+  let sg = 0;
+  let sb = 0;
+  let n = 0;
+  for (let v = 0; v < th; v++) {
+    const tv = (v + 0.5) / th;
+    for (let u = 0; u < tw; u++) {
+      const tu = (u + 0.5) / tw;
+      const x =
+        (1 - tv) * ((1 - tu) * q[0].x + tu * q[1].x) + tv * ((1 - tu) * q[3].x + tu * q[2].x);
+      const y =
+        (1 - tv) * ((1 - tu) * q[0].y + tu * q[1].y) + tv * ((1 - tu) * q[3].y + tu * q[2].y);
+      const px = sampleBilinear(img, x, y);
+      const i = (v * tw + u) * 4;
+      if (px[3] > 16 && px[0] + px[1] + px[2] > 30) {
+        dst.data[i] = px[0];
+        dst.data[i + 1] = px[1];
+        dst.data[i + 2] = px[2];
+        dst.data[i + 3] = 255;
+        sr += px[0];
+        sg += px[1];
+        sb += px[2];
+        n++;
+      }
+    }
+  }
+  const ar = n ? Math.round(sr / n) : 118;
+  const ag = n ? Math.round(sg / n) : 82;
+  const ab = n ? Math.round(sb / n) : 70;
+  for (let i = 0; i < dst.data.length; i += 4) {
+    if (dst.data[i + 3] < 16) {
+      dst.data[i] = ar;
+      dst.data[i + 1] = ag;
+      dst.data[i + 2] = ab;
+      dst.data[i + 3] = 255;
+    }
+  }
+  out.putImageData(dst, 0, 0);
+  return c;
+}
+
+function spriteOffset(
+  box: { w: number; d: number; h: number },
+  tipX: number,
+  tipY: number,
+): { x: number; y: number } {
+  const pts = boxCorners({ x: 0, y: 0, z: GROUND, ...box });
+  let tip = project(pts[0][0], pts[0][1], pts[0][2]);
+  for (const p of pts) {
+    const s = project(p[0], p[1], p[2]);
+    if (s.y < tip.y) tip = s;
+  }
+  return { x: tipX - tip.x, y: tipY - tip.y };
+}
+
+function faceQuad(
+  box: { w: number; d: number; h: number },
+  face: number[],
+  ox: number,
+  oy: number,
+): { x: number; y: number }[] {
+  const pts = boxCorners({ x: 0, y: 0, z: GROUND, ...box });
+  return face.map((i) => {
+    const s = project(pts[i][0], pts[i][1], pts[i][2]);
+    return { x: s.x + ox, y: s.y + oy };
+  });
+}
+
+function isFloorFace(corners: [number, number, number][], idx: number[]): boolean {
+  const pts = idx.map((i) => corners[i]);
+  const avgZ = (pts[0][2] + pts[1][2] + pts[2][2] + pts[3][2]) / 4;
+  const e1 = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]];
+  const e2 = [pts[3][0] - pts[0][0], pts[3][1] - pts[0][1], pts[3][2] - pts[0][2]];
+  const nz = e1[0] * e2[1] - e1[1] * e2[0];
+  return avgZ < GROUND + 0.18 && nz < 0;
+}
+
 function clampByte(n: number): number {
   return Math.max(0, Math.min(255, Math.round(n)));
 }
@@ -152,30 +340,29 @@ function clampByte(n: number): number {
 /** Erase baked Passcode/Moves glyphs by continuing the sky gradient — no flat panel. */
 function scrubBakedHud(img: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement("canvas");
-  c.width = img.width;
-  c.height = img.height;
+  c.width = STAGE_W;
+  c.height = STAGE_H;
   const g = c.getContext("2d")!;
-  g.drawImage(img, 0, 0);
-  const data = g.getImageData(0, 0, c.width, c.height);
+  g.drawImage(img, 0, 0, STAGE_W, STAGE_H);
+  const data = g.getImageData(0, 0, STAGE_W, STAGE_H);
   const px = data.data;
-  const w = c.width;
-  const x0 = Math.floor((320 * w) / img.width);
-  const y1 = Math.min(c.height, Math.ceil((50 * img.height) / img.height));
-  const xA = Math.max(0, Math.floor((240 * w) / img.width));
-  const xB = Math.max(0, Math.floor((310 * w) / img.width));
+  const x0 = Math.floor((320 * STAGE_W) / img.width);
+  const y1 = Math.min(STAGE_H, Math.ceil((50 * STAGE_H) / img.height));
+  const xA = Math.max(0, Math.floor((240 * STAGE_W) / img.width));
+  const xB = Math.max(0, Math.floor((310 * STAGE_W) / img.width));
   const span = Math.max(1, xB - xA);
   const fadeStart = Math.max(0, y1 - 8);
   for (let y = 0; y < y1; y++) {
-    const ia = (y * w + xA) * 4;
-    const ib = (y * w + xB) * 4;
+    const ia = (y * STAGE_W + xA) * 4;
+    const ib = (y * STAGE_W + xB) * 4;
     const dr = (px[ib] - px[ia]) / span;
     const dg = (px[ib + 1] - px[ia + 1]) / span;
     const db = (px[ib + 2] - px[ia + 2]) / span;
     const da = (px[ib + 3] - px[ia + 3]) / span;
     const fade = y < fadeStart ? 1 : 1 - (y - fadeStart) / (y1 - fadeStart);
-    for (let x = x0; x < w; x++) {
+    for (let x = x0; x < STAGE_W; x++) {
       const t = x - xA;
-      const i = (y * w + x) * 4;
+      const i = (y * STAGE_W + x) * 4;
       const nr = clampByte(px[ia] + dr * t);
       const ng = clampByte(px[ia + 1] + dg * t);
       const nb = clampByte(px[ia + 2] + db * t);
@@ -195,17 +382,22 @@ export function listStart(count: number, selected: number, max = LIST_MAX): numb
   return Math.max(0, Math.min(count - max, selected - Math.floor(max / 2)));
 }
 
-function idleSprite(assets: Assets, state: BlockState, cube: boolean): HTMLImageElement {
-  if (cube) return assets.block.cube;
-  if (state.ori === "forward") return assets.block.forward;
-  if (state.ori === "right") return assets.block.right;
-  return assets.block.up;
+function settledCorners(state: BlockState, cube: boolean): [number, number, number][] {
+  if (cube || state.ori === "up") return boxCorners(boxFor(state, cube));
+  if (state.ori === "forward") {
+    const from: BlockState = { x: state.x, y: state.y - 1, ori: "up" };
+    return boxCorners(boxFor(from, false), { ...rollSpec(from, "down", false), angle: -Math.PI / 2 });
+  }
+  const from: BlockState = { x: state.x - 1, y: state.y, ori: "up" };
+  return boxCorners(boxFor(from, false), { ...rollSpec(from, "right", false), angle: Math.PI / 2 });
 }
 
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   cam: Camera = { x: 0, y: 0 };
   private knockCache = new Map<HTMLImageElement, HTMLCanvasElement>();
+  private rustEnd: HTMLCanvasElement;
+  private rustSide: HTMLCanvasElement;
   private levelBg: HTMLCanvasElement;
 
   constructor(
@@ -214,6 +406,14 @@ export class Renderer {
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
+    const up = this.knocked(assets.block.up);
+    const flat = this.knocked(assets.block.forward);
+    const stand = { w: 1, d: 1, h: 2 };
+    const lie = { w: 1, d: 2, h: 1 };
+    const so = spriteOffset(stand, 110, 36);
+    const fo = spriteOffset(lie, 89, 32);
+    this.rustEnd = unprojectQuad(up, faceQuad(stand, FACES[0], so.x, so.y), 96, 96);
+    this.rustSide = unprojectQuad(flat, faceQuad(lie, FACES[0], fo.x, fo.y), 96, 192);
     this.levelBg = scrubBakedHud(assets.ui.levelBg);
   }
 
@@ -247,9 +447,12 @@ export class Renderer {
 
   drawBg(kind: "menu" | "level"): void {
     const img = kind === "menu" ? this.assets.ui.menuBg : this.levelBg;
-    this.ctx.fillStyle = "#000";
+    this.ctx.drawImage(img, 0, 0, STAGE_W, STAGE_H);
+    const g = this.ctx.createRadialGradient(200, 90, 20, 260, 180, 420);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, "rgba(0,0,0,0.35)");
+    this.ctx.fillStyle = g;
     this.ctx.fillRect(0, 0, STAGE_W, STAGE_H);
-    this.ctx.drawImage(img, 0, 0);
   }
 
   drawLevel(stage: Stage, ghosts: Stage[] = []): void {
@@ -273,27 +476,28 @@ export class Renderer {
         const flyX = Math.cos(ang) * rad;
         const flyY = Math.sin(ang) * rad * 0.62;
         const rot = s * (Math.PI * 2.4 + r * 5.2);
-        const ox = this.cam.x + p.x + drift + flyX;
-        const oy = this.cam.y + p.y - lift + flyY;
+        const dx = this.cam.x + p.x + TILE_OX + drift + flyX;
+        const dy = this.cam.y + p.y + TILE_OY - lift + flyY;
         this.ctx.save();
         this.ctx.globalAlpha = Math.min(1, t * 1.4) * (1 - scatter * 0.92);
-        this.ctx.translate(ox, oy);
+        this.ctx.translate(dx + 25, dy + 17);
         if (rot) this.ctx.rotate(rot);
+        const drawX = -25;
+        const drawY = -17;
         if (tile === "bridgeL" || tile === "bridgeR") {
           const b = stage.bridgeAt(x, y)!;
           const fade = Math.min(1, t * 1.4) * (1 - scatter * 0.92);
           this.ctx.globalAlpha = fade;
           const frames = b.kind === "l" ? this.assets.bridges.l : this.assets.bridges.r;
           const fi = Math.max(0, Math.min(frames.length - 1, Math.round(b.frame)));
-          this.ctx.drawImage(this.knocked(frames[fi]), BRIDGE_OX, BRIDGE_OY);
-          this.ctx.restore();
+          this.ctx.drawImage(this.knocked(frames[fi]), drawX - 76, drawY - 90);
           if (b.flash > 0) {
-            this.ctx.save();
             this.ctx.globalAlpha = Math.min(0.7, b.flash * 2) * fade;
             this.ctx.fillStyle = b.flashOn ? "rgba(70,255,90,0.7)" : "rgba(255,50,40,0.7)";
+            this.ctx.translate(-25 - TILE_OX, -17 - TILE_OY);
             this.drawTileOverlay(x, y);
-            this.ctx.restore();
           }
+          this.ctx.restore();
           continue;
         }
         const img = tileImage(this.assets, tile);
@@ -301,7 +505,7 @@ export class Renderer {
           this.ctx.restore();
           continue;
         }
-        this.ctx.drawImage(img, TILE_OX, TILE_OY);
+        this.ctx.drawImage(img, drawX, drawY);
         this.ctx.restore();
       }
     }
@@ -334,15 +538,15 @@ export class Renderer {
     if (stage.split) {
       const a = this.cubeDrawable(stage, stage.cubeA, stage.active === 0, 0, alphaMul);
       const b = this.cubeDrawable(stage, stage.cubeB, stage.active === 1, 1, alphaMul);
-      return [a, b].sort((p, q) => p.depth - q.depth);
+      return [a, b];
     }
     const state = anim && (anim.kind === "roll" || anim.kind === "fall" || anim.kind === "sink" || anim.kind === "drop")
       ? anim.from
       : stage.block;
-    const nudge = anim?.kind === "roll" && (anim.dir === "left" || anim.dir === "down") ? 1 : 0;
+    const depth = state.y * 20 - state.x + 8;
     return [
       {
-        depth: state.y - state.x + nudge,
+        depth,
         draw: () => this.drawBox(stage.block, anim, false, 0, alphaMul),
       },
     ];
@@ -351,9 +555,8 @@ export class Renderer {
   private cubeDrawable(stage: Stage, cell: Cell, active: boolean, which: 0 | 1, alphaMul = 1) {
     const moving = stage.anim?.kind === "roll" && stage.active === which;
     const state: BlockState = { x: cell.x, y: cell.y, ori: "up" };
-    const nudge = moving && (stage.anim?.dir === "left" || stage.anim?.dir === "down") ? 1 : 0;
     return {
-      depth: cell.y - cell.x + nudge,
+      depth: cell.y * 20 - cell.x + 8,
       draw: () => {
         this.drawBox(state, moving ? stage.anim : stage.anim?.kind === "splitdrop" ? stage.anim : null, true, which, alphaMul);
         if (active && alphaMul >= 1 && stage.selectTimer > 0) this.drawBrackets(cell, stage.selectTimer);
@@ -382,51 +585,66 @@ export class Renderer {
   drawBox(state: BlockState, anim: Anim | null, cube: boolean, which: 0 | 1 = 0, alphaMul = 1): void {
     let extraZ = 0;
     let alpha = 1;
+    let roll: { origin: [number, number, number]; axis: [number, number, number]; angle: number } | undefined;
     let boxState = state;
-    let rollDir: Dir | null = null;
-    let rollT = 0;
-    let sinkT = -1;
 
     if (anim?.kind === "drop") {
-      extraZ = (1 - ease(anim.t / anim.dur)) * 6.7;
+      const t = ease(anim.t / anim.dur);
+      extraZ = (1 - t) * 6.7;
       boxState = anim.to;
     } else if (anim?.kind === "splitdrop") {
-      extraZ = (1 - ease(anim.t / anim.dur)) * 5.6;
+      const t = ease(anim.t / anim.dur);
+      extraZ = (1 - t) * 5.6;
       cube = true;
       boxState = which === 0
         ? { x: anim.from.x, y: anim.from.y, ori: "up" }
         : { x: anim.to2!.x, y: anim.to2!.y, ori: "up" };
     } else if (anim?.kind === "roll" && anim.dir) {
+      const t = ease(anim.t / anim.dur);
       boxState = anim.from;
-      rollDir = anim.dir;
-      rollT = Math.min(1, anim.t / anim.dur);
+      const spec = rollSpec(anim.from, anim.dir, cube);
+      roll = { ...spec, angle: spec.angle * t };
     } else if (anim?.kind === "fall") {
       const t = anim.t / anim.dur;
       extraZ = -t * t * 9;
       alpha = 1 - t * 0.9;
-      boxState = anim.from;
       if (anim.dir) {
-        rollDir = anim.dir;
-        rollT = 1;
+        const spec = rollSpec(anim.from, anim.dir, cube);
+        roll = { ...spec, angle: spec.angle * (1 + 0.4 * t) };
       }
+      boxState = anim.from;
     } else if (anim?.kind === "sink") {
-      sinkT = Math.min(1, anim.t / anim.dur);
-      extraZ = -ease(sinkT) * 0.35;
+      const t = ease(anim.t / anim.dur);
+      extraZ = -t * 2.2;
+      alpha = 1 - t;
       boxState = anim.from;
     }
 
-    let img: HTMLImageElement;
-    if (sinkT >= 0) {
-      const frames = this.assets.block.sink;
-      img = frames[Math.min(frames.length - 1, Math.floor(sinkT * frames.length))];
-    } else if (rollDir) {
-      const ori = cube ? "cube" : boxState.ori;
-      const frames = this.assets.block.rolls[ori][rollDir];
-      const fi = Math.min(frames.length - 1, Math.floor(rollT * frames.length));
-      img = frames[Math.max(0, fi)];
+    let corners: [number, number, number][];
+    if (roll) {
+      const base = settledCorners(boxState, cube);
+      corners = base.map((p) => rotateAround(p, roll.origin, roll.axis, roll.angle));
     } else {
-      img = idleSprite(this.assets, boxState, cube);
+      corners = settledCorners(boxState, cube);
     }
+    if (extraZ !== 0) {
+      for (const c of corners) c[2] += extraZ;
+    }
+    const screen = corners.map((c) => {
+      const p = project(c[0], c[1], c[2]);
+      return { x: this.cam.x + p.x, y: this.cam.y + p.y, z: c[2], d: p.y };
+    });
+
+    const faces = FACES.map((idx, fi) => {
+      const pts = idx.map((i) => screen[i]);
+      const ax = pts[1].x - pts[0].x;
+      const ay = pts[1].y - pts[0].y;
+      const bx = pts[2].x - pts[1].x;
+      const by = pts[2].y - pts[1].y;
+      const cross = ax * by - ay * bx;
+      const depth = (pts[0].d + pts[1].d + pts[2].d + pts[3].d) / 4;
+      return { pts, cross, depth, fi };
+    }).sort((a, b) => a.depth - b.depth);
 
     this.drawBlockShadow(
       boxState,
@@ -434,13 +652,58 @@ export class Renderer {
       (anim?.kind === "fall" || anim?.kind === "sink" ? alpha * 0.25 : 0.38) * alphaMul,
     );
 
-    const p = project(boxState.x, boxState.y, extraZ);
-    const ox = cube ? CUBE_OX : BLOCK_OX;
-    const oy = cube ? CUBE_OY : BLOCK_OY;
-    this.ctx.save();
-    this.ctx.globalAlpha = alpha * alphaMul;
-    this.ctx.drawImage(this.knocked(img), this.cam.x + p.x + ox, this.cam.y + p.y + oy);
-    this.ctx.restore();
+    const shade = [1, 0.55, 0.82, 0.66, 0.74, 0.88];
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha * alphaMul;
+    for (const f of faces) {
+      if (f.cross <= 0) continue;
+      if (extraZ >= -0.08 && isFloorFace(corners, FACES[f.fi])) continue;
+      const tex = cube || f.fi === 0 || f.fi === 1 ? this.rustEnd : this.rustSide;
+      this.paintFace(tex, f.pts, shade[f.fi]);
+    }
+    ctx.restore();
+  }
+
+  private paintFace(
+    tex: HTMLCanvasElement,
+    pts: { x: number; y: number }[],
+    shade: number,
+  ): void {
+    const ctx = this.ctx;
+    const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+    const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+    const grow = pts.map((p) => {
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const len = Math.hypot(dx, dy) || 1;
+      return { x: p.x + (dx / len) * 0.55, y: p.y + (dy / len) * 0.55 };
+    });
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(grow[0].x, grow[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(grow[i].x, grow[i].y);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${Math.round(118 * shade)},${Math.round(82 * shade)},${Math.round(70 * shade)})`;
+    ctx.fill();
+    ctx.clip();
+    const p0 = grow[0];
+    const p1 = grow[1];
+    const p3 = grow[3];
+    ctx.setTransform(
+      (p1.x - p0.x) / tex.width,
+      (p1.y - p0.y) / tex.width,
+      (p3.x - p0.x) / tex.height,
+      (p3.y - p0.y) / tex.height,
+      p0.x,
+      p0.y,
+    );
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(tex, 0, 0);
+    ctx.fillStyle = `rgba(16, 8, 4, ${(1 - shade) * 0.32})`;
+    ctx.fillRect(0, 0, tex.width, tex.height);
+    ctx.restore();
   }
 
   private drawBlockShadow(state: BlockState, cube: boolean, alpha: number): void {
@@ -645,14 +908,57 @@ export class Renderer {
     });
   }
 
+  drawSpinningBox(t: number, x: number, y: number): void {
+    const prev = this.cam;
+    const mid = project(0.5, 0.5, 1);
+    this.cam = { x: x - mid.x, y: y - mid.y };
+    const origin: [number, number, number] = [0.5, 0.5, 1];
+    const len = Math.hypot(0.28, 1, 0.18) || 1;
+    const axis: [number, number, number] = [0.28 / len, 1 / len, 0.18 / len];
+    const angle = t * Math.PI * 2 * 2.4;
+    const box = { x: 0, y: 0, z: 0, w: 1, d: 1, h: 2 };
+    const corners = boxCorners(box).map((p) => rotateAround(p, origin, axis, angle));
+    const screen = corners.map((c) => {
+      const p = project(c[0], c[1], c[2]);
+      return { x: this.cam.x + p.x, y: this.cam.y + p.y, z: c[2], d: p.y };
+    });
+    const faces = FACES.map((idx, fi) => {
+      const pts = idx.map((i) => screen[i]);
+      const ax = pts[1].x - pts[0].x;
+      const ay = pts[1].y - pts[0].y;
+      const bx = pts[2].x - pts[1].x;
+      const by = pts[2].y - pts[1].y;
+      const cross = ax * by - ay * bx;
+      const depth = (pts[0].d + pts[1].d + pts[2].d + pts[3].d) / 4;
+      return { pts, cross, depth, fi };
+    }).sort((a, b) => a.depth - b.depth);
+    const shade = [1, 0.55, 0.82, 0.66, 0.74, 0.88];
+    this.ctx.save();
+    for (const f of faces) {
+      if (f.cross <= 0) continue;
+      const tex = f.fi === 0 || f.fi === 1 ? this.rustEnd : this.rustSide;
+      this.paintFace(tex, f.pts, shade[f.fi]);
+    }
+    this.ctx.restore();
+    this.cam = prev;
+  }
+
   drawSpinBlock(frame: number, x: number, y: number): void {
     const frames = this.assets.block.spin;
-    const img = frames[((frame % frames.length) + frames.length) % frames.length];
-    const scale = 0.72;
+    const img = frames[Math.max(0, Math.min(frames.length - 1, frame))];
+    const scale = 0.86;
     this.ctx.save();
-    this.ctx.translate(x, y);
-    this.ctx.scale(scale, scale);
-    this.ctx.drawImage(this.knocked(img), BLOCK_OX, BLOCK_OY);
+    const gx = x + img.width * scale * 0.48;
+    const gy = y + img.height * scale * 0.55;
+    const glow = this.ctx.createRadialGradient(gx, gy, 6, gx, gy, 78);
+    glow.addColorStop(0, "rgba(255, 120, 30, 0.4)");
+    glow.addColorStop(0.5, "rgba(180, 50, 10, 0.16)");
+    glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+    this.ctx.fillStyle = glow;
+    this.ctx.beginPath();
+    this.ctx.arc(gx, gy, 78, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.drawImage(this.knocked(img), x, y, img.width * scale, img.height * scale);
     this.ctx.restore();
   }
 
