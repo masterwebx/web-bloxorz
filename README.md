@@ -1,4 +1,4 @@
-> **Reference freeze.** This canvas remake is parked at the last good commit before a failed original-sprite port. Active work is the GitHub fork of Cybernate, which keeps their CreateJS game as the base: **https://github.com/masterwebx/bloxorz-cybernate**
+> **Reference freeze.** This canvas remake is parked at the last good commit before a failed original-sprite port. Active work is the GitHub fork of Cybernate (renamed so it does not collide with upstream): **https://github.com/masterwebx/bloxorz-html5** — play it at https://masterwebx.github.io/bloxorz-html5/
 
 # Player-named Bloxorz remake
 
